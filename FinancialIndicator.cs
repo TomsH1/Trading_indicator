@@ -116,6 +116,8 @@ namespace NinjaTrader.NinjaScript.Indicators
         private bool redrawLowZoneIsRequired = false;
         private bool isBullishBreakoutConfirmed = false;
         private bool isBearishBreakoutConfirmed = false;
+        private bool isTheFirstSwingLow = false;
+        private bool isTheFirstSwingHigh = false;
         private bool isTheFirstBarToAnalize = true;
         private bool isConfirmationOfZoneBrokenUpwards;
         private bool isConfirmationOfZoneBrokenDownSide;
@@ -191,6 +193,8 @@ namespace NinjaTrader.NinjaScript.Indicators
                 DrawStartVerticalLine();
                 currentMaxHighPrice = double.MinValue;
                 currentMinLowPrice = double.MaxValue;
+                isTheFirstSwingHigh = true;
+                isTheFirstSwingLow = true;
                 Print($"currentMinLowPrice in realtime state = {currentMinLowPrice}");
             }
         }
@@ -464,39 +468,6 @@ namespace NinjaTrader.NinjaScript.Indicators
             return -1;
         }
 
-        public void RemoveOverlappingZones(Zone newZone)
-        {
-            // Buscar zonas solapadas en priceListZones
-            var overlappingZones = priceListsZones.Where(zone =>
-                (newZone.MaxOrMinPrice >= zone.ClosePrice && newZone.ClosePrice <= zone.MaxOrMinPrice) ||
-                (newZone.MaxOrMinPrice <= zone.ClosePrice && newZone.ClosePrice >= zone.MaxOrMinPrice))
-                .ToList();
-
-            // Eliminar zonas solapadas
-            /*foreach (var zone in overlappingZones)
-            {
-                priceListsZones.Remove(zone);
-                if (zone.IsResistenceZone())
-                {
-                    RemoveDrawObject("RegionHighLightY" + zone.Id);
-                }
-                else
-                {
-                    RemoveDrawObject("RegionLowLightY" + zone.Id);
-                }
-                if (currentZone != null)
-                {
-                    CalculateCurrentMinOrMaxPrice();
-                }
-            }
-            */
-
-            // Agregar la nueva zona después de eliminar las solapadas
-            //priceListsZones.Add(newZone);
-
-            //Print("Zonas solapadas eliminadas");
-        }
-
         protected override void OnBarUpdate()
         {
 
@@ -504,7 +475,6 @@ namespace NinjaTrader.NinjaScript.Indicators
             {
                 zigZagHighSeries[0] = 0;
                 zigZagLowSeries[0] = 0;
-                //currentMinLowPrice = Input[0];
                 return;
             }
 
@@ -517,13 +487,6 @@ namespace NinjaTrader.NinjaScript.Indicators
 
             ISeries<double> highSeries = High;
             ISeries<double> lowSeries = Low;
-
-            // Establecer un valor minimo alcanzado en base a las últimas 20 barras aprocimadas cuando el valor minimo sea 0
-            if (CurrentBar >= ChartBars.FromIndex && currentMinLowPrice == double.MaxValue)
-            {
-                //Print($"guardando el precio mínimo: {lowSeries[0]} en currentMinLowPrice");
-                //currentMinLowPrice = lowSeries[1];
-            }
 
             try
             {
@@ -553,110 +516,114 @@ namespace NinjaTrader.NinjaScript.Indicators
                 // Verifica si el valor de bajo actual está por debajo del último precio de swing menos una desviación definida (DeviationValue), calculada en puntos o en porcentaje.
                 bool isOverLowDeviation = (DeviationType == DeviationType.Percent && IsPriceGreater(lastSwingPrice * (1.0 - DeviationValue), lowSeries[1])) || (DeviationType == DeviationType.Points && IsPriceGreater(lastSwingPrice - DeviationValue, lowSeries[1]));
 
-                double saveValue = 0.0;
+                double currentSwingPrice = 0.0;
                 bool addHigh = false;
                 bool addLow = false;
                 bool updateHigh = false;
                 bool updateLow = false;
 
-                if (!isTheFirstBarToAnalize)
+               
+                if (IsPriceGreaterThanCurrentMaxHighPrice(highSeries[1]))
                 {
-                    if (IsPriceGreaterThanCurrentMaxHighPrice(highSeries[1]))
+                    //Actualiza el precio máximo alcanzado durante la sesión
+                    currentMaxHighPrice = highSeries[1];
+                    Print($"El precio máximo acaba de ser roto con el valor ${currentMaxHighPrice} en la barra #{CurrentBar}");
+
+                    // Si no hay rompimientos al alza pendientes por completar añade un nuevo rompimiento a la cola de confirmación
+                    if (!isHighBreakoutPendingToConfirmation && !isTheFirstSwingHigh)
                     {
-                        //Actualiza el precio máximo alcanzado durante la sesión
-                        currentMaxHighPrice = highSeries[1];
-                        Print($"El precio máximo acaba de ser roto con el valor ${currentMaxHighPrice} en la barra #{CurrentBar}");
-
-                        // Si no hay rompimientos al alza pendientes por completar añade un nuevo rompimiento a la cola de confirmación
-                        if (!isHighBreakoutPendingToConfirmation)
+                        var newBreakout = new BreakoutCandidate
                         {
-                            var newBreakout = new BreakoutCandidate
-                            {
-                                BreakoutPrice = highSeries[1],
-                                BreakoutBarIndex = CurrentBar,
-                                Type = BreakoutCandidate.BreakoutType.Bullish,
-                                IsConfirmed = false
-                            };
+                            BreakoutPrice = highSeries[1],
+                            BreakoutBarIndex = CurrentBar,
+                            Type = BreakoutCandidate.BreakoutType.Bullish,
+                            IsConfirmed = false
+                        };
 
-                            Print($"se ha generado un rompimiento alcista en la barra:{newBreakout.BreakoutBarIndex} - con el precio: ${newBreakout.BreakoutPrice}");
+                        Print($"se ha generado un rompimiento alcista en la barra:{newBreakout.BreakoutBarIndex} - con el precio: ${newBreakout.BreakoutPrice}");
 
-                            pendingListOfBreakouts.Add(newBreakout);
-                            isHighBreakoutPendingToConfirmation = true;
-                        }
+                        pendingListOfBreakouts.Add(newBreakout);
+                        isHighBreakoutPendingToConfirmation = true;
+                    }
 
-                        maxHighBrokenAccumulated += 1;
-                        Print($"maxHighBrokenAccumulated = {maxHighBrokenAccumulated}");
+                    maxHighBrokenAccumulated += 1;
+                    Print($"maxHighBrokenAccumulated = {maxHighBrokenAccumulated}");
 
-                        if (
-                            CurrentBar >= ChartBars.FromIndex
-                            //&& isConfirmationOfZoneBrokenUpwards
-                        )
-                        {
-                            maxHighBreakBar = CurrentBar;
+                    if (
+                        CurrentBar >= ChartBars.FromIndex
+                        //&& isConfirmationOfZoneBrokenUpwards
+                    )
+                    {
+                        maxHighBreakBar = CurrentBar;
                            
-                            resistenceZoneBreakoutPrice = currentMaxHighPrice;
-                            currentClosingHighPrice = Open[1] >= Close[1] ? Open[1] : Close[1];
-                            Print($"currentClosingHighPrice = {currentClosingHighPrice}");
+                        resistenceZoneBreakoutPrice = currentMaxHighPrice;
+                        currentClosingHighPrice = Open[1] >= Close[1] ? Open[1] : Close[1];
+                        Print($"currentClosingHighPrice = {currentClosingHighPrice}");
 
-                            Draw.Text(
-                                this,              // La referencia al indicador o estrategia actual
-                                "maxPriceBarText", // Un identificador único para el texto
-                                $"Bar: {CurrentBar} MaxPrice: {resistenceZoneBreakoutPrice}$",
-                                // El texto a dibujar
-                                1, // El índice de la barra donde se dibuja (0 es la barra actual)
-                                highSeries[1] + TickSize,  // (encima del máximo de la barra actual)
-                                Brushes.Green  // El color del texto
-                            );
-                        }
-                        
+                        Draw.Text(
+                            this,              // La referencia al indicador o estrategia actual
+                            "maxPriceBarText", // Un identificador único para el texto
+                            $"Bar: {CurrentBar} MaxPrice: {resistenceZoneBreakoutPrice}$",
+                            // El texto a dibujar
+                            1, // El índice de la barra donde se dibuja (0 es la barra actual)
+                            highSeries[1] + TickSize,  // (encima del máximo de la barra actual)
+                            Brushes.Green  // El color del texto
+                        );
                     }
-                    if (IsPriceLessThanCurrentMinLowPrice(lowSeries[1]))
-                    {
-                        //Actualiza el precio máximo alcanzado durante la sesión
-                        currentMinLowPrice = lowSeries[1];
-                        Print($"El precio mínimo acaba de ser roto con el valor ${currentMinLowPrice} en la barra #{CurrentBar}");
-                        // Si no hay rompimientos a la baja pendientes por completar añade un nuevo rompimiento a la cola de confirmación
-                        if (!isLowBreakoutPendingToConfirmation)
-                        {
-                            var newBreakout = new BreakoutCandidate
-                            {
-                                BreakoutPrice = lowSeries[1],
-                                BreakoutBarIndex = CurrentBar,
-                                Type = BreakoutCandidate.BreakoutType.Bearish,
-                                IsConfirmed = false
-                            };
 
-                            Print($"se ha generado un rompimiento bajista en la barra: {newBreakout.BreakoutBarIndex} - con el precio: ${newBreakout.BreakoutPrice}");
-
-                            pendingListOfBreakouts.Add(newBreakout);
-                            isLowBreakoutPendingToConfirmation = true;
-                        }
+                    if(isTheFirstSwingHigh)
+                        isTheFirstSwingHigh = false;
                         
-                        minLowBrokenAccumulated += 1;
-                        Print($"minLowBrokenAccumulated = {minLowBrokenAccumulated}");
-
-                        if (
-                            CurrentBar >= ChartBars.FromIndex
-                        //&& isConfirmationOfZoneBrokenDownSide 
-                        )
-                        {
-                            minLowBreakBar = CurrentBar;
-                            supportZoneBreakoutPrice = currentMinLowPrice;
-                            currentClosingLowPrice = Close[1] <= Open[1] ? Close[1] : Open[1];
-                            Print($"currentClosingLowPrice = {currentClosingLowPrice}");
-
-                            Draw.Text(
-                                this,              // La referencia al indicador o estrategia actual
-                                "minPriceBarText", // Un identificador único para el texto
-                                $"Bar: {CurrentBar} MinPrice: {supportZoneBreakoutPrice}$", // El texto a dibujar
-                                1,                 // El índice de la barra donde se dibuja (0 es la barra actual)
-                                lowSeries[1] + TickSize,  // (encima del máximo de la barra actual)
-                                Brushes.DarkRed  // El color del texto
-                            );
-                        }
-                       
-                    }
                 }
+                if (IsPriceLessThanCurrentMinLowPrice(lowSeries[1]))
+                {
+                    //Actualiza el precio máximo alcanzado durante la sesión
+                    currentMinLowPrice = lowSeries[1];
+                    Print($"El precio mínimo acaba de ser roto con el valor ${currentMinLowPrice} en la barra #{CurrentBar}");
+                    // Si no hay rompimientos a la baja pendientes por completar añade un nuevo rompimiento a la cola de confirmación
+                    if (!isLowBreakoutPendingToConfirmation && !isTheFirstSwingLow)
+                    {
+                        var newBreakout = new BreakoutCandidate
+                        {
+                            BreakoutPrice = lowSeries[1],
+                            BreakoutBarIndex = CurrentBar,
+                            Type = BreakoutCandidate.BreakoutType.Bearish,
+                            IsConfirmed = false
+                        };
+
+                        Print($"se ha generado un rompimiento bajista en la barra: {newBreakout.BreakoutBarIndex} - con el precio: ${newBreakout.BreakoutPrice}");
+
+                        pendingListOfBreakouts.Add(newBreakout);
+                        isLowBreakoutPendingToConfirmation = true;
+                    }
+                        
+                    minLowBrokenAccumulated += 1;
+                    Print($"minLowBrokenAccumulated = {minLowBrokenAccumulated}");
+
+                    if (
+                        CurrentBar >= ChartBars.FromIndex
+                    //&& isConfirmationOfZoneBrokenDownSide 
+                    )
+                    {
+                        minLowBreakBar = CurrentBar;
+                        supportZoneBreakoutPrice = currentMinLowPrice;
+                        currentClosingLowPrice = Close[1] <= Open[1] ? Close[1] : Open[1];
+                        Print($"currentClosingLowPrice = {currentClosingLowPrice}");
+
+                        Draw.Text(
+                            this,              // La referencia al indicador o estrategia actual
+                            "minPriceBarText", // Un identificador único para el texto
+                            $"Bar: {CurrentBar} MinPrice: {supportZoneBreakoutPrice}$", // El texto a dibujar
+                            1,                 // El índice de la barra donde se dibuja (0 es la barra actual)
+                            lowSeries[1] + TickSize,  // (encima del máximo de la barra actual)
+                            Brushes.DarkRed  // El color del texto
+                        );
+                    }
+
+                    if (isTheFirstSwingLow)
+                        isTheFirstSwingLow = false;
+                       
+                }        
 
                 if (
                   priceListsZones.Any() &&
@@ -699,6 +666,8 @@ namespace NinjaTrader.NinjaScript.Indicators
                             lowSeries[1], zone.MaxOrMinPrice)
                         )
                         {
+                            Print($"lowSeries[1] = ${lowSeries[1]}, zone.MaxOrMinPrice = {zone.MaxOrMinPrice}");
+                            Print($"ZoneType = {zone.Type}");
                             if (!zone.IsBreakoutPendingToConfirmation)
                             {
                                 var newBreakout = new BreakoutCandidate
@@ -730,10 +699,22 @@ namespace NinjaTrader.NinjaScript.Indicators
                         CurrentBar <= breakout.BreakoutBarIndex + confirmationBars
                        )
                     {
-                        if (breakout.Type.Equals(BreakoutCandidate.BreakoutType.Bullish))
+                        if (
+                            breakout.Type.Equals(BreakoutCandidate.BreakoutType.Bullish) && breakout.IsIntermediateBreakout)
                         {
                             // Almacenar el precio máximo alcanzado de la vela anterior a la actual
+                            breakout.NextFiveIntermediateHighBreakoutBarsPrices.Add(highSeries[1]);
+                        }
+                        else if (breakout.Type.Equals(BreakoutCandidate.BreakoutType.Bullish))
+                        {
+                            Print($"guardando en NextFiveHighBreakoutBarsPrices: = {highSeries[1]}");
                             breakout.NextFiveHighBreakoutBarsPrices.Add(highSeries[1]);
+                        }
+                        else if (
+                            breakout.Type.Equals(BreakoutCandidate.BreakoutType.Bearish) && breakout.IsIntermediateBreakout) 
+                        {
+                            // Almacenar el precio mínimo alcanzado de la vela anterior a la actual
+                            breakout.NextFiveIntermediateLowBreakoutBarsPrices.Add(lowSeries[1]);
                         }
                         else if (breakout.Type.Equals(BreakoutCandidate.BreakoutType.Bearish))
                         {
@@ -755,27 +736,27 @@ namespace NinjaTrader.NinjaScript.Indicators
                 // Establece valores para dibujar nuevo movimiento al alza
                 if (trendDir <= 0 && isSwingHigh && isOverHighDeviation)
                 {
-                    saveValue = highSeries[1];
+                    currentSwingPrice = highSeries[1];
                     addHigh = true;
                     trendDir = 1;
                 }
                 // Establece valores para dibujar nuevo movimiento a la baja
                 else if (trendDir >= 0 && isSwingLow && isOverLowDeviation)
                 {
-                    saveValue = lowSeries[1];
+                    currentSwingPrice = lowSeries[1];
                     addLow = true;
                     trendDir = -1;
                 }
                 // Establece valores para actualizar dibujo del movimiento al alza 
                 else if (trendDir == 1 && isSwingHigh && IsPriceGreater(highSeries[1], lastSwingPrice))
                 {
-                    saveValue = highSeries[1];
+                    currentSwingPrice = highSeries[1];
                     updateHigh = true;
                 }
                 // Establece valores para actualizar dibujo del movimiento a la baja 
                 else if (trendDir == -1 && isSwingLow && IsPriceGreater(lastSwingPrice, lowSeries[1]))
                 {
-                    saveValue = lowSeries[1];
+                    currentSwingPrice = lowSeries[1];
                     updateLow = true;
                 }
 
@@ -794,26 +775,26 @@ namespace NinjaTrader.NinjaScript.Indicators
 
                     if (addHigh || updateHigh)
                     {
-                        zigZagHighZigZags[1] = saveValue;
-                        currentZigZagHigh = saveValue;
-                        zigZagHighSeries[1] = currentZigZagHigh;
-                        Value[1] = currentZigZagHigh;
+                        zigZagHighZigZags[1] = currentSwingPrice;
+                        currentZigZagHigh    = currentSwingPrice;
+                        zigZagHighSeries[1]  = currentZigZagHigh;
+                        Value[1]             = currentZigZagHigh;
 
                         //highBrokenAccumulated = highSeries[1] <= resistenceZoneBreakoutPrice ? 0 : highBrokenAccumulated;
 
                     }
                     else if (addLow || updateLow)
                     {
-                        zigZagLowZigZags[1] = saveValue;
-                        currentZigZagLow = saveValue;
-                        zigZagLowSeries[1] = currentZigZagLow;
-                        Value[1] = currentZigZagLow;
+                        zigZagLowZigZags[1] = currentSwingPrice;
+                        currentZigZagLow    = currentSwingPrice;
+                        zigZagLowSeries[1]  = currentZigZagLow;
+                        Value[1]            = currentZigZagLow;
 
                         //lowBrokenAccumulated = lowSeries[1] >= supportZoneBreakoutPrice ? 0 : lowBrokenAccumulated;
                     }
 
                     lastSwingIdx = CurrentBar - 1;
-                    lastSwingPrice = Input[1];
+                    lastSwingPrice = currentSwingPrice;
 
                     Print($"currentMaxPrice = {currentMaxHighPrice}");
                     Print($"currentMinPrice = {currentMinLowPrice}");
@@ -829,6 +810,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                     zone => zone.RedrawLowZoneIsRequired == true
                 );
 
+                Print($"Pending breakouts candidates before event = ${pendingListOfBreakouts.Count()}");
                 // Procesar lista de rompimientos pendientes
                 if (pendingListOfBreakouts.Count > 0)
                 {
@@ -851,12 +833,18 @@ namespace NinjaTrader.NinjaScript.Indicators
                         // Si el tipo de rompimiento a confirmar es sobre una resisentancia intermedia
                         if (breakout.Type.Equals(BreakoutCandidate.BreakoutType.Bullish) && breakout.IsIntermediateBreakout)
                         {
-                            intermediateBullishBreakoutConfirmed = breakout.NextFiveHighBreakoutBarsPrices.Any(highBreakoutPrice => highBreakoutPrice > breakout.BreakoutPrice);
+                            intermediateBullishBreakoutConfirmed = breakout.NextFiveIntermediateHighBreakoutBarsPrices.Any(highBreakoutPrice => highBreakoutPrice > breakout.BreakoutPrice);
 
                             int j = 1;
-                            foreach (var highbreakoutPrice in breakout.NextFiveHighBreakoutBarsPrices)
+                            double confirmationPrice = breakout.BreakoutPrice;
+                            foreach (var highBreakoutPrice in breakout.NextFiveIntermediateHighBreakoutBarsPrices)
                             {
-                                Print($"Verificando si el precio ${highbreakoutPrice} de la barra  {breakout.BreakoutBarIndex + j} es mayor al precio ${breakout.BreakoutPrice} de la barra de rompimiento intermedio {breakout.BreakoutBarIndex} = {highbreakoutPrice > breakout.BreakoutPrice}");
+                                Print($"Verificando si el precio ${highBreakoutPrice} de la barra  {breakout.BreakoutBarIndex + j} es mayor al precio ${breakout.BreakoutPrice} de la barra de rompimiento intermedio {breakout.BreakoutBarIndex} = {highBreakoutPrice > breakout.BreakoutPrice}");
+                                // Almacenar el valor de rompimiento.
+                                if(highBreakoutPrice > breakout.BreakoutPrice)
+                                {
+                                    confirmationPrice = highBreakoutPrice;
+                                }
 
                                 j++;
                             }
@@ -866,9 +854,9 @@ namespace NinjaTrader.NinjaScript.Indicators
                                 // TODO: Debe romper la zona superada en concreto, en lugar de todas las zonas intermedias cuyo precio aún no ha sido superado
 
                                 // Si el rompimiento es confirmado y la zona actual es una resistencia (originalmente siendo un soporte) intermedia la elimina
-                                if (intermediateBullishBreakoutConfirmed && zone.IsResistenceZone() && zone.IsIntermediateZone)
+                                if (intermediateBullishBreakoutConfirmed && zone.IsResistenceZone() && zone.IsIntermediateZone && confirmationPrice > zone.MaxOrMinPrice)
                                 {
-                                    Print($"Rompiendo resisetencia = {zone.Id}");
+                                    Print($"Rompiendo resistencia = {zone.Id}");
                                     double lastPriceClose = zone.ClosePrice;
                                     double lastMaxOrMinPrice = zone.MaxOrMinPrice;
 
@@ -882,6 +870,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
                                     breakout.Completed = true;
                                     breakout.IsConfirmed = true;
+                                    break;
                                 }
 
                                 // Si no se confirma el rompimiento, es una resistencia intermedia y la barra actual es posterior a la cantidad de barras de confirmación extiende el margen de la zona al precio del rompimiento intermedio sin confirmación
@@ -908,20 +897,25 @@ namespace NinjaTrader.NinjaScript.Indicators
                         // Si el tipo de rompimiento a confirmar es sobre un soporte intermedio
                         else if (breakout.Type.Equals(BreakoutCandidate.BreakoutType.Bearish) && breakout.IsIntermediateBreakout)
                         {
-                            intermediateBearishBreakoutConfirmed = breakout.NextFiveLowBreakoutBarsPrices.Any(lowBreakoutPrice => lowBreakoutPrice < breakout.BreakoutPrice);
+                            intermediateBearishBreakoutConfirmed = breakout.NextFiveIntermediateLowBreakoutBarsPrices.Any(lowBreakoutPrice => lowBreakoutPrice < breakout.BreakoutPrice);
 
                             int z = 1;
-                            foreach (var lowBreakoutPrice in breakout.NextFiveLowBreakoutBarsPrices)
+                            double confirmationPrice = breakout.BreakoutPrice;
+                            foreach (var lowBreakoutPrice in breakout.NextFiveIntermediateLowBreakoutBarsPrices)
                             {
                                 Print($"Verificando si el precio ${lowBreakoutPrice} de la barra  {breakout.BreakoutBarIndex + z} es menor al precio ${breakout.BreakoutPrice} de la barra de rompimiento intermedio {breakout.BreakoutBarIndex} = {lowBreakoutPrice < breakout.BreakoutPrice}");
 
+                                if (lowBreakoutPrice < breakout.BreakoutPrice)
+                                {
+                                    confirmationPrice = lowBreakoutPrice;
+                                }
                                 z++;
                             }
 
                             foreach (var zone in priceListsZones)
                             {
                                 // Si el rompimiento es confirmado y la zona actual es un soporte (originalmente siendo una resistencia) intermedio lo elimina
-                                if (intermediateBearishBreakoutConfirmed && !zone.IsResistenceZone() && zone.IsIntermediateZone)
+                                if (intermediateBearishBreakoutConfirmed && !zone.IsResistenceZone() && zone.IsIntermediateZone && confirmationPrice < zone.MaxOrMinPrice)
                                 {
                                     Print($"Rompiendo soporte = {zone.Id}");
                                     double lastMaxOrMinPrice = zone.MaxOrMinPrice;
@@ -937,6 +931,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
                                     breakout.Completed = true;
                                     breakout.IsConfirmed = true;
+                                    break;
                                 }
 
                                 // Si no se confirma el rompimiento, es un soporte intermedio y la barra actual es posterior a la cantidad de barras de confirmación extiende el margen de la zona al precio de rompimiento intermedio sin confirmación
@@ -1046,6 +1041,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
                     // Eliminar elementos completados
                     pendingListOfBreakouts.RemoveAll(breakout => breakout.Completed);
+                    Print($"Pending breakouts candidates after event = ${pendingListOfBreakouts.Count()}");
                 }
 
                 zigZagHighSeries[0] = currentZigZagHigh;
@@ -1056,7 +1052,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                 {
                     // Dibujar la línea en la barra actual cuando el gráfico se ha cargado
                     // por completo
-                    DrawStartVerticalLine();
+                   //DrawStartVerticalLine();
 
                     // Cambiar el estado para evitar dibujar la línea más de una vez
                     isTheFirstBarToAnalize = false;   
@@ -1641,11 +1637,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
                         List<Zone> updatePriceListZones = priceListsZones.Select(zone =>
                         {
-                            bool priceIsNotsbetween = PriceIsNotBetweenGeneratedPrice(
-                                lastMinLowPrice, lastClosingLowPrice,
-                                zone.MaxOrMinPrice, zone.ClosePrice
-                            );
-
+                            
                             /*
                                 Print("before breakout: ");
                                 Print($"Type = {zone.Type} ID = {zone.Id} " +
@@ -1825,10 +1817,11 @@ namespace NinjaTrader.NinjaScript.Indicators
 
                                 if (currentZigZagHigh < zone.MaxOrMinPrice)
                                 {
-                                    Print($"currentZigZagHigh = {currentZigZagHigh} zone.MaxOrMinPrice " +
+                                    /*Print($"currentZigZagHigh = {currentZigZagHigh} zone.MaxOrMinPrice " +
                                     $"= {zone.MaxOrMinPrice}");
                                     Print($"currentZigZagHigh < zone.MaxOrMinPrice {zone.Id} = " +
                                     $"{currentZigZagHigh < zone.MaxOrMinPrice}");
+                                    */
 
                                     Print($"Rompiendo zona del soporte = {zone.Id}");
                                     zone.IsSupportBreakout = true;
@@ -1850,9 +1843,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                             )
                             {
                                 Print($"eliminando resistencia = {zone.Id}");
-                                //RemoveDrawObject("RegionLowLightY" + zone.Id);
                                 RemoveDrawObject("RegionHighLightY" + zone.Id);
-                                //Print("currentMaxHighPrice =" + currentMaxHighPrice);
                                 return true; // Eliminar zona
                             }
                             else if (
@@ -1862,8 +1853,6 @@ namespace NinjaTrader.NinjaScript.Indicators
                             {
                                 Print($"eliminando soporte = {zone.Id}");
                                 RemoveDrawObject("RegionLowLightY" + zone.Id);
-                                //RemoveDrawObject("RegionHighLightY" + zone.Id);
-                                //Print("currentMinLowPrice = " + currentMinLowPrice);
                                 return true; // Eliminar zona
                             }
 
@@ -2059,10 +2048,21 @@ namespace NinjaTrader.NinjaScript.Indicators
             get; set;
         } = new List<double>();
 
+        public List<double> NextFiveIntermediateHighBreakoutBarsPrices
+        {
+            get; set;
+        } = new List<double>();
+
         public List<double> NextFiveLowBreakoutBarsPrices
         {
             get; set;
         } = new List<double>();
+
+        public List<double> NextFiveIntermediateLowBreakoutBarsPrices
+        {
+            get; set;
+        } = new List<double>();
+
     }
 }
 
