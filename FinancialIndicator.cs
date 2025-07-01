@@ -25,6 +25,7 @@ using System.Windows.Media.Animation;
 using System.Windows.Media.Converters;
 #endregion
 
+
 //This namespace holds Indicators in this folder and is required. Do not change it. 
 namespace NinjaTrader.NinjaScript.Indicators
 {
@@ -532,7 +533,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                 if (IsPriceGreaterThanCurrentMaxHighPrice(highSeries[1]))
                 {
                     //Actualiza el precio máximo alcanzado durante la sesión
-                    currentMaxHighPrice = highSeries[1];
+                    this.currentMaxHighPrice = highSeries[1];
                     Print($"El precio máximo acaba de ser roto con el valor ${currentMaxHighPrice} en la barra #{CurrentBar}");
 
                     // Si no hay rompimientos al alza pendientes por completar añade un nuevo rompimiento a la cola de confirmación
@@ -555,36 +556,35 @@ namespace NinjaTrader.NinjaScript.Indicators
                     maxHighBrokenAccumulated += 1;
                     Print($"maxHighBrokenAccumulated = {maxHighBrokenAccumulated}");
 
-                    if (
+                    /*if (
                         CurrentBar >= ChartBars.FromIndex
                         //&& isConfirmationOfZoneBrokenUpwards
                     )
-                    {
-                        maxHighBreakBar = CurrentBar;
-                           
-                        resistenceZoneBreakoutPrice = currentMaxHighPrice;
-                        currentClosingHighPrice = Open[1] >= Close[1] ? Open[1] : Close[1];
-                        Print($"currentClosingHighPrice = {currentClosingHighPrice}");
+                    {*/
+                    maxHighBreakBar = CurrentBar;
+                    resistenceZoneBreakoutPrice = currentMaxHighPrice;
+                    currentClosingHighPrice = Open[1] >= Close[1] ? Open[1] : Close[1];
+                    Print($"currentClosingHighPrice = {currentClosingHighPrice}");
 
-                        Draw.Text(
-                            this,              // La referencia al indicador o estrategia actual
-                            "maxPriceBarText", // Un identificador único para el texto
-                            $"Bar: {CurrentBar} MaxPrice: {resistenceZoneBreakoutPrice}$",
-                            // El texto a dibujar
-                            1, // El índice de la barra donde se dibuja (0 es la barra actual)
-                            highSeries[1] + TickSize,  // (encima del máximo de la barra actual)
-                            Brushes.Green  // El color del texto
-                        );
-                    }
+                    Draw.Text(
+                        this,              // La referencia al indicador o estrategia actual
+                        "maxPriceBarText", // Un identificador único para el texto
+                        $"Bar: {CurrentBar} MaxPrice: {resistenceZoneBreakoutPrice}$",
+                        // El texto a dibujar
+                        1, // El índice de la barra donde se dibuja (0 es la barra actual)
+                        highSeries[1] + TickSize,  // (encima del máximo de la barra actual)
+                        Brushes.Green  // El color del texto
+                    );
+                    /*}*/
 
-                    if(isTheFirstSwingHigh)
+                    if (isTheFirstSwingHigh)
                         isTheFirstSwingHigh = false;
                         
                 }
                 if (IsPriceLessThanCurrentMinLowPrice(lowSeries[1]))
                 {
                     //Actualiza el precio máximo alcanzado durante la sesión
-                    currentMinLowPrice = lowSeries[1];
+                    this.currentMinLowPrice = lowSeries[1];
                     Print($"El precio mínimo acaba de ser roto con el valor ${currentMinLowPrice} en la barra #{CurrentBar}");
                     // Si no hay rompimientos a la baja pendientes por completar añade un nuevo rompimiento a la cola de confirmación
                     if (!isLowBreakoutPendingToConfirmation && !isTheFirstSwingLow)
@@ -606,25 +606,25 @@ namespace NinjaTrader.NinjaScript.Indicators
                     minLowBrokenAccumulated += 1;
                     Print($"minLowBrokenAccumulated = {minLowBrokenAccumulated}");
 
-                    if (
+                    /*if (
                         CurrentBar >= ChartBars.FromIndex
                     //&& isConfirmationOfZoneBrokenDownSide 
                     )
-                    {
-                        minLowBreakBar = CurrentBar;
-                        supportZoneBreakoutPrice = currentMinLowPrice;
-                        currentClosingLowPrice = Close[1] <= Open[1] ? Close[1] : Open[1];
-                        Print($"currentClosingLowPrice = {currentClosingLowPrice}");
+                    {*/
+                    minLowBreakBar = CurrentBar;
+                    supportZoneBreakoutPrice = currentMinLowPrice;
+                    currentClosingLowPrice = Close[1] <= Open[1] ? Close[1] : Open[1];
+                    Print($"currentClosingLowPrice = {currentClosingLowPrice}");
 
-                        Draw.Text(
-                            this,              // La referencia al indicador o estrategia actual
-                            "minPriceBarText", // Un identificador único para el texto
-                            $"Bar: {CurrentBar} MinPrice: {supportZoneBreakoutPrice}$", // El texto a dibujar
-                            1,                 // El índice de la barra donde se dibuja (0 es la barra actual)
-                            lowSeries[1] + TickSize,  // (encima del máximo de la barra actual)
-                            Brushes.DarkRed  // El color del texto
-                        );
-                    }
+                    Draw.Text(
+                        this,              // La referencia al indicador o estrategia actual
+                        "minPriceBarText", // Un identificador único para el texto
+                        $"Bar: {CurrentBar} MinPrice: {supportZoneBreakoutPrice}$", // El texto a dibujar
+                        1,                 // El índice de la barra donde se dibuja (0 es la barra actual)
+                        lowSeries[1] + TickSize,  // (encima del máximo de la barra actual)
+                        Brushes.DarkRed  // El color del texto
+                    );
+                    /*}*/
 
                     if (isTheFirstSwingLow)
                         isTheFirstSwingLow = false;
@@ -1156,12 +1156,17 @@ namespace NinjaTrader.NinjaScript.Indicators
         {
             if (double.IsNaN(currentMinLowPrice))
             {
+                Print($"this.currentMinLowPrice = ${this.currentMinLowPrice}");
                 currentMinLowPrice = this.currentMinLowPrice;
+                Print($"currentMinLowPrice = ${currentMinLowPrice}");
             }
 
             // Compara el precio mínimo anterior alcanzado con el nuevo precio alcanzado
             bool lastPriceIsLessThanMinLowPrice = lastPrice
             .ApproxCompare(currentMinLowPrice) < 0;
+            
+            Print($"lastPrice: ${lastPrice} < currentMinLowPrice: ${currentMinLowPrice} = {lastPriceIsLessThanMinLowPrice}");
+
 
             return lastPriceIsLessThanMinLowPrice;
         }
@@ -1286,40 +1291,11 @@ namespace NinjaTrader.NinjaScript.Indicators
 
                 if (lastIdx >= startIndex)
                 {
-                    //Print("Displacement = ");
-                    //Print(Displacement);
+                   
 
                     bool isABullishPullback = isSwingLow;
-                    double low1 = double.MaxValue;
-                    double low2 = double.MaxValue;
-                    double low3 = double.MaxValue;
-
                     bool isABearishPullback = isSwingHigh;
-                    double high1 = double.MinValue;
-                    double high2 = double.MinValue;
-                    double high3 = double.MinValue;
-
-                   /* if (isHighZoneExtended || isBullishBreakoutConfirmed)
-                    {
-                        low1 = Low.GetValueAt(idx);
-                        low3 = Low.GetValueAt(idx - 1);
-                        low3 = Low.GetValueAt(idx - 2);
-
-                        // Valida si la vela alcista actual retrocede más que la anterior
-                        isABullishPullback = low3 > low2 && low2 < low1;
-                    }
-
-                    if (isLowZoneExtended || isBearishBreakoutConfirmed)
-                    {
-                        high1 = High.GetValueAt(idx);
-                        high2 = High.GetValueAt(idx - 1);
-                        high3 = High.GetValueAt(idx - 2);
-
-                        // Valida si la vela bajista actual retrocede más que la anterior
-                        isABearishPullback = high3 < high2 && high2 > high1;
-                    }
-                   */
-
+                 
                     // Establecer cordenadas de la línea zig zag. 
                     float x1 = (chartControl.BarSpacingType == BarSpacingType.TimeBased || chartControl.BarSpacingType == BarSpacingType.EquidistantMulti && idx + Displacement >= ChartBars.Count
                         ? chartControl.GetXByTime(ChartBars.GetTimeByBarIdx(chartControl, idx + Displacement))
@@ -1329,16 +1305,6 @@ namespace NinjaTrader.NinjaScript.Indicators
 
                     if (startVerticalLineIndex != -1) {
                         
-                        if (isHigh && priceListsZones.Any() && isABullishPullback && (isHighZoneExtended || isBullishBreakoutConfirmed))
-                        {
-                            Print($"low1: ${low1} low2: ${low2} low3: ${low3} - isABullishPullback (low3 > low2 && low2 < low1) = {isABullishPullback}");
-                        }
-
-                        if (isLow && priceListsZones.Any() && isABearishPullback && (isLowZoneExtended || isBearishBreakoutConfirmed))
-                        {
-                            Print($"high1: ${high1} high2: ${high2} high3: ${high3} - isABearishPullback (high3 < high2 && high2 > high1) = {isABearishPullback}");
-                        }
-
                         //Validar si es una movimiento alcista y si el valor de la vela es mayor o igual al último precio 
                         if (isHigh && isHighZoneExtended && priceListsZones.Any() && isABullishPullback)
                         {
@@ -1381,8 +1347,8 @@ namespace NinjaTrader.NinjaScript.Indicators
                                       */
 
 
-                                // Dibujar zonas de soporte y resistencia
-                                Draw.RegionHighlightY(
+                    // Dibujar zonas de soporte y resistencia
+                    Draw.RegionHighlightY(
                                     this,                         // Contexto del indicador o estrategia
                                     "RegionHighLightY" + currentZone.Id, // Nombre único para la región
                                     currentZone.ClosePrice,        // Nivel de precio inferior
@@ -1396,7 +1362,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                                 lastMaxHighPrice = currentMaxHighPrice;
                                 lastClosingHighPrice = currentClosingHighPrice;
 
-                                //: Actualizar máximo preció alcnazado
+                                //: Actualizar máximo preció alcanzado
                                 CalculateCurrentMinOrMaxPrice();
                                 //: Actualizar zona actual 
                                 List<Zone> updateMaxOrMinPriceZone =
@@ -1623,7 +1589,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                                 lastMinLowPrice = currentMinLowPrice;
                                 lastClosingLowPrice = currentClosingLowPrice;
 
-                                //: Actualizar máximo preció alcnazado
+                                //: Actualizar mínimo preció alcanzado
                                 CalculateCurrentMinOrMaxPrice();
 
                                 //: Actualizar zona actual 
@@ -1875,7 +1841,6 @@ namespace NinjaTrader.NinjaScript.Indicators
                             .ToList();
                             priceListsZones = breakoutsZonesUpdated;
 
-
                             priceListsZones.RemoveAll(zone =>
                             {
                                 if (
@@ -1901,8 +1866,8 @@ namespace NinjaTrader.NinjaScript.Indicators
                                 return false; // No eliminar zona
                             });
 
-                            CalculateCurrentMaxPrice();
-                            CalculateCurrentMinPrice();
+                            //CalculateCurrentMaxPrice();
+                            //CalculateCurrentMinPrice();
                         }
                     }
                     
