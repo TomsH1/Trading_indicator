@@ -38,7 +38,6 @@ namespace NinjaTrader.NinjaScript.Indicators
         private static int startVerticalLineIndex = -1;
         // Variable para controlar si estamos en tiempo real y debemos generar ZigZag
         private bool isRealtimeZigZagActive = false;
-
         // Zonas alcistas y bajistas generadas en el gráfico
         private List<Zone> priceListsZones;
         //Ultima zona dibujada o editada en el gráfico
@@ -52,6 +51,7 @@ namespace NinjaTrader.NinjaScript.Indicators
         // Estas son series que almacenan los valores de los picos y valles detectados por el indicador ZigZag en las barras de alto y bajo, respectivamente. Sirven para registrar los puntos de cambio en la tendencia.
         private Series<double> zigZagHighZigZags;
         private Series<double> zigZagLowZigZags;
+        private Series<bool> vShapeCandleTypes; // Almacenar el tipo de vela para cada forma V
 
         // Almacenan toda la serie de zig zags del gráfico
         private Series<double> zigZagHighSeries;
@@ -63,45 +63,18 @@ namespace NinjaTrader.NinjaScript.Indicators
 
         // Ultimo valor máximo generado durante la sesión
         private double currentMaxHighPrice = double.MaxValue;
-        // Precio máximo de la barra del primer swing alcista
-        //private double firstSwingHighBarPrice;
         // Valor de cierre de la última vela que rompe al alza 
         private double currentClosingHighPrice;
-        // Valor de cierre anterior de la última vela que rompe al alza
-        private double lastClosingHighPrice;
-        // Antepenultimo valor máximo generado duranta la sesión
-        private double lastMaxHighPrice;
-
         // Ultimo valor mínimo alcanzado durante la sesión
         private double currentMinLowPrice = double.MinValue;
-        // Precio mínimo de la barra del primer swing alcista
-        //private double firstSwingLowBarPrice;
-        
         // Valor de cierre de la última vela que rompe a la baja 
         private double currentClosingLowPrice;
-        // Valor de cierre anterior de la última vela que rompe a la baja
-        private double lastClosingLowPrice;
-        // Antepenultimo valor mínimo alcanzado duranta la sesión
-        private double lastMinLowPrice;
-
         // Ultimo valor máximo alcanzado durante la sesión
         private double resistenceZoneBreakoutPrice;
         // Ultimo valor mínimo alcanzado durante la sesión
         private double supportZoneBreakoutPrice;
-
-        // guarda la barrra en la que se alcanza un rompimiento al alza, se resetea cuando un nuevo tope al alza es alcanzado
-        private int maxHighBreakBar;
-        // Cantidad de veces consecutivas que se realiza un rompimiento al alza antes de generarse una resistencia
-        private int maxHighBrokenAccumulated;
-        // Cantidad de veces consecutivas que se realiza un rompimiento al alza antes de extender una resistencia intermedia
-        private int highBrokenAccumulated;
-
-        // guarda la barrra en la que se alcanza un rompimiento a la baja, se resetea cuando un nuevo tope a la baja es alcanzado
-        private int minLowBreakBar;
-        // Cantidad de veces consecutivas que se realiza un rompimiento a la baja antes de extender un soporte intermedio
-        private int lowBrokenAccumulated;
-        // Cantidad de veces consecutivas que se realiza un rompimiento a la baja antes de generarse una soporte
-        private int minLowBrokenAccumulated;
+        // Precio de la oscilación actual (swing) detectada.
+        private double currentSwingPrice;
 
         // Precio de la última oscilación (swing) detectada.
         private double lastSwingPrice;
@@ -127,9 +100,6 @@ namespace NinjaTrader.NinjaScript.Indicators
         private bool redrawLowZoneIsRequired = false;
         
         // VARIABLES SEÑUELO: Almacenan el precio máximo/mínimo anterior antes del dibujo de zona
-        // para evitar que se use el precio de velas posteriores durante el extendimiento
-        private double previousMaxHighPrice = double.MinValue;
-        private double previousMinLowPrice = double.MaxValue;
         private bool isBullishBreakoutConfirmed = false;
         private bool isBearishBreakoutConfirmed = false;
         private bool isTheFirstSwingHigh = false;
@@ -143,8 +113,7 @@ namespace NinjaTrader.NinjaScript.Indicators
         private bool vShapeDrawn = false;
         private double vShapeHighPrice = 0;
         private double vShapeLowPrice = 0;
-        private bool isConfirmationOfZoneBrokenUpwards;
-        private bool isConfirmationOfZoneBrokenDownSide;
+        private bool vShapeCandleIsBullish = false; // Almacenar el tipo de vela para la forma V
         private bool currentCandleIsDoji;
 
         private double lastHistHigh;
@@ -152,11 +121,30 @@ namespace NinjaTrader.NinjaScript.Indicators
 
         // Al inicio del archivo, agrega una variable de control para evitar dibujar múltiples veces:
         private bool initialZigZagLineDrawn = false;
+        private bool currentMaxHighWasCalculatedFirstTime;
+        private bool currentMinLowWasCalculatedFirstTime;
 
         // 1. Agregar variables (a nivel de clase):
         private bool pendingFirstZigZagLine = false;
         private double initialY0, initialY1;
         private int initialBarIdx0, initialBarIdx1;
+
+        // Ultima actualización para ticks en marketData Update
+        DateTime lastUpdate = DateTime.MinValue;
+
+        private int firstBreakDirection;
+        private double firstBreakDirectionPrice;
+        private bool lastCandleExceedsBothPeaksEndsInABullishPeak;
+
+        // Condición: Si el pico de la vela anterior a la actual se encuentra en una vela que supero el precio de su vela anterior (forma de v) en ambas direcciones
+        private bool lastPeakIsInAVShapeCandle;
+        
+        // Determinar si la vela anterior es verde (alcista) y la actual es roja (bajista)
+        // Vela verde: Close[1] > Open[1]
+        // Vela roja:  Close[0] < Open[0]
+        bool candleBeforePreviousOneIsBullish = false;
+        bool previousCandleIsBullish = false;
+        bool currentCandleIsBullish = false;
 
         protected override void OnStateChange()
         {
@@ -187,26 +175,12 @@ namespace NinjaTrader.NinjaScript.Indicators
                 currentZigZagLow = 0;
 
                 currentClosingHighPrice = double.MinValue;
-                lastMaxHighPrice = double.MinValue;
-                lastClosingHighPrice = double.MinValue;
-                previousMaxHighPrice = double.MinValue;
-                //firstSwingHighBarPrice = double.MaxValue;
-                maxHighBrokenAccumulated = 0;
-                highBrokenAccumulated = 0;
-
                 currentClosingLowPrice = double.MaxValue;
-                lastMinLowPrice = double.MaxValue;
-                lastClosingLowPrice = double.MaxValue;
-                previousMinLowPrice = double.MaxValue;
-                //firstSwingLowBarPrice = double.MinValue;
-                minLowBrokenAccumulated = 0;
-                lowBrokenAccumulated = 0;
 
                 lastSwingIdx = -1;
+                currentSwingPrice = 0.0;
                 lastSwingPrice = 0.0;
-                trendDir = 0; // 1 = trend up, -1 = trend down, init = 0
-                isConfirmationOfZoneBrokenUpwards = false;
-                isConfirmationOfZoneBrokenDownSide = false;
+                trendDir = 0; // 1 = trend up, -1 = trend down, init = 0;
                 isSwingHigh = false;
                 isSwingLow = false;
                 
@@ -215,6 +189,19 @@ namespace NinjaTrader.NinjaScript.Indicators
                 vShapeDrawn = false;
                 vShapeHighPrice = 0;
                 vShapeLowPrice = 0;
+                vShapeCandleIsBullish = false;
+
+                currentMaxHighWasCalculatedFirstTime = false;
+                currentMinLowWasCalculatedFirstTime = false;
+
+                firstBreakDirection = 0;
+                firstBreakDirectionPrice = 0;
+                lastCandleExceedsBothPeaksEndsInABullishPeak = false;
+                lastPeakIsInAVShapeCandle = false;
+
+                candleBeforePreviousOneIsBullish = false;
+                previousCandleIsBullish = false;
+                currentCandleIsBullish = false;
                 
                 startIndex = int.MinValue;
             }
@@ -222,21 +209,18 @@ namespace NinjaTrader.NinjaScript.Indicators
             {
                 zigZagHighZigZags = new Series<double>(this, MaximumBarsLookBack.Infinite);
                 zigZagLowZigZags = new Series<double>(this, MaximumBarsLookBack.Infinite);
+                vShapeCandleTypes = new Series<bool>(this, MaximumBarsLookBack.Infinite);
                 zigZagHighSeries = new Series<double>(this, MaximumBarsLookBack.Infinite);
                 zigZagLowSeries = new Series<double>(this, MaximumBarsLookBack.Infinite);
                 priceListsZones = new List<Zone>();
                 pendingListOfBreakouts = new List<BreakoutCandidate>();
                 resistenceZoneBreakoutPrice = 0;
                 supportZoneBreakoutPrice = double.MaxValue;
-                maxHighBreakBar = 0;
                 currentZone = null;
-                // Aquí capturamos el índice de la última barra cargada
-                // Marcamos que el script ha sido reiniciado
-
             }
             else if (State == State.Realtime)
             {
-                Print($"State == State.Realtime : {true}");
+                //Print($"State == State.Realtime : {true}");
                 // Aquí estamos entrando en tiempo real, después de cargar las barras históricas
                 DrawStartVerticalLine();
                 
@@ -249,7 +233,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                 
                 Print($"ZigZag activado en tiempo real desde la barra #{CurrentBar}");
 
-                pendingFirstZigZagLine = false;
+                /*pendingFirstZigZagLine = false;
                 if (Bars != null && Bars.Count > 1 && Highs[0].Count > 1 && Lows[0].Count > 1)
                 {
                     initialBarIdx0 = CurrentBar;
@@ -271,6 +255,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                     }
                     pendingFirstZigZagLine = true;
                 }
+                */
             }
         }
 
@@ -281,21 +266,22 @@ namespace NinjaTrader.NinjaScript.Indicators
         private void ResetZigZagState()
         {
             // Reiniciar precios
-            currentMaxHighPrice = double.MinValue;
-            currentMinLowPrice = double.MaxValue;
+            currentZigZagHigh = 0;
+            currentZigZagLow = 0;
+            currentMaxHighPrice = double.MaxValue;
+            currentMinLowPrice = double.MinValue;
             
             // Reiniciar flags de primer swing
             isTheFirstSwingHigh = true;
             isTheFirstSwingLow = true;
             
             // Reiniciar estado del ZigZag
+            currentSwingPrice = 0.0;
             lastSwingPrice = 0.0;
             lastSwingIdx = -1;
             trendDir = 0;
             
             // Reiniciar confirmaciones
-            isConfirmationOfZoneBrokenUpwards = false;
-            isConfirmationOfZoneBrokenDownSide = false;
             isSwingHigh = false;
             isSwingLow = false;
             
@@ -304,23 +290,10 @@ namespace NinjaTrader.NinjaScript.Indicators
             vShapeDrawn = false;
             vShapeHighPrice = 0;
             vShapeLowPrice = 0;
-            
-            // Reiniciar contadores
-            maxHighBrokenAccumulated = 0;
-            highBrokenAccumulated = 0;
-            minLowBrokenAccumulated = 0;
-            lowBrokenAccumulated = 0;
-            
+
             // Reiniciar precios de cierre
             currentClosingHighPrice = double.MinValue;
-            lastMaxHighPrice = double.MinValue;
-            lastClosingHighPrice = double.MinValue;
-            previousMaxHighPrice = double.MinValue;
-            
             currentClosingLowPrice = double.MaxValue;
-            lastMinLowPrice = double.MaxValue;
-            lastClosingLowPrice = double.MaxValue;
-            previousMinLowPrice = double.MaxValue;
             
             // Reiniciar precios de rompimiento
             resistenceZoneBreakoutPrice = 0;
@@ -328,13 +301,21 @@ namespace NinjaTrader.NinjaScript.Indicators
 
             currentCandleIsDoji = false;
             
-            // Reiniciar barras de rompimiento
-            maxHighBreakBar = 0;
-            minLowBreakBar = 0;
-
             lastHistHigh = 0;
             lastHistLow = 0;
-            
+
+            firstBreakDirection = 0;
+            firstBreakDirectionPrice = 0;
+            lastCandleExceedsBothPeaksEndsInABullishPeak = false;
+            lastPeakIsInAVShapeCandle = false;
+
+            candleBeforePreviousOneIsBullish = false;
+            previousCandleIsBullish = false;
+            currentCandleIsBullish = false;
+
+            currentMaxHighWasCalculatedFirstTime = false;
+            currentMinLowWasCalculatedFirstTime = false;
+
             // Limpiar listas
             priceListsZones.Clear();
             pendingListOfBreakouts.Clear();
@@ -351,7 +332,6 @@ namespace NinjaTrader.NinjaScript.Indicators
             
             Print("Estado del ZigZag reiniciado para tiempo real");
         }
-
         public void CalculateCurrentMinOrMaxPrice()
         {
             if (priceListsZones.Any())
@@ -499,20 +479,64 @@ namespace NinjaTrader.NinjaScript.Indicators
             return -1;
         }
 
+        protected override void OnMarketData(MarketDataEventArgs marketDataUpdate)
+        {
+
+            if (marketDataUpdate.MarketDataType != MarketDataType.Last)
+            return;
+
+            //lastUpdate = marketDataUpdate.Time;
+            double tickPrice = marketDataUpdate.Price;
+            if(tickPrice > High[0] && firstBreakDirection == 0){
+                //Print($"high series de la vela {CurrentBar} anterior: ${High[0]}");
+                // Marca la primera superación en realación a la vela anterior como alcista
+                firstBreakDirection = 1;
+                firstBreakDirectionPrice = tickPrice; 
+                //Print($"Cambiando firstBreakDirection durante el transcurso de acción del precio ${tickPrice} de la vela {CurrentBar + 1} a: {firstBreakDirection}");
+            }
+
+            else if(tickPrice < Low[0] && firstBreakDirection == 0){
+                //Print($"low series de la vela {CurrentBar} anterior: ${Low[0]}");
+                // Marca la primera superación en realación a la vela anterior como bajista
+                firstBreakDirection = -1;
+                firstBreakDirectionPrice = tickPrice;
+                //Print($"Cambiando firstBreakDirection durante el transcurso de acción del precio ${tickPrice} de la vela {CurrentBar + 1} a: {firstBreakDirection}");
+            }
+            /*
+            Print($"--- Nuevo tick recibido ---");
+            Print($"Tipo de dato: {marketDataUpdate.MarketDataType}");
+            Print($"Precio: {marketDataUpdate.Price}");
+            Print($"Volumen: {marketDataUpdate.Volume}");
+            Print($"Hora del tick: {marketDataUpdate.Time}");
+            Print($"Instrumento: {marketDataUpdate.Instrument.FullName}");
+            Print($"Último Bid conocido: {marketDataUpdate.Bid}");
+            Print($"Último Ask conocido: {marketDataUpdate.Ask}");
+            Print($"Último precio Last: {marketDataUpdate.Last}");
+            */
+        }
+
         protected override void OnBarUpdate()
         {
             //bool is_the_latest_bar = false;
             // SOLO PROCESAR ZIGZAG SI ESTAMOS EN TIEMPO REAL Y LA BARRA ES NUEVA
             if (!isRealtimeZigZagActive)
             {
-                Print($"startVerticalLineIndex = {startVerticalLineIndex}");
-                Print($"ultima barra omitida antes de entrar en tiempo real {CurrentBar}");
+                /*if(High[1] > High[0]){
+                    trendDir = 1;
+                }
 
-                lastHistHigh = High[0];
-                lastHistLow = Low[0];
+                else if(Low[1] < Low[0]){
+                    trendDir = -1;
+                }
+
+                else if(High[1] > High[0] && Low[1] < Low[0]){
+                    trendDir = 1;
+                    trendDir = -1;
+                }*/
                 // Si no estamos en tiempo real, no procesar ZigZag
                 return;
             }
+
             // Initialization - Solo para la primera barra en tiempo real
             if (lastSwingPrice == 0.0 && CurrentBar == startVerticalLineIndex + 1)
             {
@@ -522,24 +546,31 @@ namespace NinjaTrader.NinjaScript.Indicators
 
             }
 
+            if(CurrentBar >= startVerticalLineIndex + 1){
+                Print($"=== ZIGZAG ACTIVADO EN TIEMPO REAL - Procesando barra #{CurrentBar} ===");
+                //Print($"Estableciendo precios iniciales - Max: ${currentMaxHighPrice}, Min: ${currentMinLowPrice} en barra #{CurrentBar}");
+            }
+
+            if(firstBreakDirection == 1){
+                //Print($"La vela {CurrentBar} actual primero supero el precio al alza con el valor ${firstBreakDirectionPrice}");
+                //firstBreakDirection = 0;
+                //firstBreakDirectionPrice = double.MinValue;
+            }
+            else if(firstBreakDirection == -1){
+                //Print($"La vela {CurrentBar} actual primero supero el precio a la baja con el valor ${firstBreakDirectionPrice}");
+                //firstBreakDirection = 0;
+                //firstBreakDirectionPrice = double.MinValue;
+            }
+            
             ISeries<double> highSeries = High;
             ISeries<double> lowSeries = Low;
 
             try
             {
-                
-                double currentSwingPrice = 0.0;
                 bool addHigh = false;
                 bool addLow = false;
                 bool updateHigh = false;
                 bool updateLow = false;
-
-                // Determinar si la vela anterior es verde (alcista) y la actual es roja (bajista)
-                // Vela verde: Close[1] > Open[1]
-                // Vela roja:  Close[0] < Open[0]
-                bool candleBeforePreviousOneIsBullish = false;
-                bool previousCandleIsBullish = false;
-                bool currentCandleIsBullish = false;
 
 				// ¿Cambia la dirección? (mínimo actual retrocede más que el mínimo de la vela anterior)
 				bool changeDir = false;
@@ -553,27 +584,18 @@ namespace NinjaTrader.NinjaScript.Indicators
                 
                 if (lastNonDojiIndex != -1)
                 {
-                    //Print($"lastNonDojiIndex = {lastNonDojiIndex}");
-                    // Determinar si la última vela no doji fue alcista o bajista
+                    // Determinar si la última vela NO doji fue alcista o bajista
                     lastNonDojiIsBullish = Close[lastNonDojiIndex] > Open[lastNonDojiIndex];
-                    //previousCandleMinPrice = lastNonDojiIsBullish ? lowSeries[1] : highSeries[1];
                 }
-                // Establecer precios iniciales solo para la primera barra en tiempo real
-                if (CurrentBar == startVerticalLineIndex + 1)
-                {
-                    Print($"=== ZIGZAG ACTIVADO EN TIEMPO REAL - Procesando barra #{CurrentBar} ===");
 
-                    currentMaxHighPrice = highSeries[1];
-                    currentMinLowPrice = lowSeries[1];
-                    Print($"Estableciendo precios iniciales - Max: ${currentMaxHighPrice}, Min: ${currentMinLowPrice} en barra #{CurrentBar}");
-                }
-                else if(CurrentBar >= startVerticalLineIndex + 2){
+                if(CurrentBar >= startVerticalLineIndex + 1){
                     
                     // valida si la vela actual es Doji
                     currentCandleIsDoji = !(Close[0] < Open[0]) && !(Close[0] > Open[0]);
                     candleBeforePreviousOneIsBullish = Close[2] > Open[2];
                     previousCandleIsBullish = Close[1] > Open[1] || lastNonDojiIsBullish;
-                    currentCandleIsBullish = Close[0] > Open[0] || currentCandleIsDoji;
+                    // TODO probar velas dojis para corroborar que esten siendo tomadas como el tipo de vela correcta
+                    currentCandleIsBullish = Close[0] > Open[0] || (currentCandleIsDoji && lastNonDojiIsBullish);
                 }
 
                 // Min por color de vela 
@@ -589,16 +611,12 @@ namespace NinjaTrader.NinjaScript.Indicators
                 // Comprueba si la barra del medio (lowSeries[1]) es un pico, es decir, su valor es mayor o igual que las barras adyacentes.
                 isSwingLow = lowSeries[0].ApproxCompare(lowSeries[1]) < 0;
 
-                itIsABearishPullback = false;
-                itIsABullishPullback = false;
-
                 // NUEVA LÓGICA ESPECIAL: Verificar si la vela actual supera por ambos picos a la anterior
                 // Condición: vela actual supera tanto el máximo como el mínimo de la vela anterior
                 bool currentCandleExceedsBothPeaks = isSwingHigh && isSwingLow;
                 // Condición: vela antepenúltima supera tanto el máximo como el mínimo de la vela trasantepenúltima 
                 bool lastCandleExceedsBothPeaks = highSeries[1] > highSeries[2] && lowSeries[1] < lowSeries[2];
             
-
                 // Verifica si el valor de alto actual está por encima del último precio de swing más una desviación definida (DeviationValue), calculada en puntos o en porcentaje.
                 bool isOverHighDeviation = (DeviationType == DeviationType.Percent && IsPriceGreater(highSeries[0], lastSwingPrice * (1.0 + DeviationValue))) || (DeviationType == DeviationType.Points && IsPriceGreater(highSeries[0], lastSwingPrice + DeviationValue));
 
@@ -614,29 +632,216 @@ namespace NinjaTrader.NinjaScript.Indicators
                 bool max_in_opposite_bullish_direction_is_exceeded = is_a_maximum_in_the_opposite_direction_to_the_upward_movement && lowSeries[0] < lowSeries[1]; 
 
                 // Establece valores para actualizar dibujo del movimiento al alza y a la baja 
-                bool itIsAnUpdatedBullishPullback = trendDir == 1 && isSwingHigh && IsPriceGreater
-                (highSeries[0], lastSwingPrice);
-                bool itIsAnUpdatedBearishPullback = trendDir == -1 && isSwingLow && !IsPriceGreater(lowSeries[0], lastSwingPrice);
+                //bool itIsAnUpdatedBullishPullback = trendDir == 1 && isSwingHigh && IsPriceGreater(highSeries[0], lastSwingPrice);
+                //bool itIsAnUpdatedBearishPullback = trendDir == -1 && isSwingLow && !IsPriceGreater(lowSeries[0], lastSwingPrice);
 
                 bool isPriceGreatherThanCurrentMaxHighPrice = 
                 IsPriceGreaterThanCurrentMaxHighPrice(highSeries[0]);
                 bool isPriceLessThanCurrentMinLowPrice = 
                 IsPriceLessThanCurrentMinLowPrice(lowSeries[0]);
 
-                // Actualizar precios máximos y mínimos alcanzados y guardar rompimientos pendientes a confirmar
-                if (isPriceGreatherThanCurrentMaxHighPrice)
+                itIsABearishPullback = false;
+                itIsABullishPullback = false;
+            
+                if(!previousCandleIsBullish){
+                    if(highSeries[0] > previousCandleMinPrice){
+                        changeDir = trendDir <= 0;
+                        trendDir = 1;
+                        itIsABullishPullback = true;
+                    }
+                    else if(lowSeries[0] < previousCandleMaxPrice || max_in_opposite_bullish_direction_is_exceeded){
+                        changeDir = trendDir >= 0;
+                        trendDir = -1;
+                        itIsABearishPullback = true;
+                    }
+
+                    string typeOfSwing = trendDir > 0 ? "alcista" : "bajista";
+                    Print($"cambiando a retroceso {typeOfSwing} changeDir = {changeDir}");   
+                }
+                else if(previousCandleIsBullish){
+                    if(lowSeries[0] < previousCandleMinPrice){
+                        changeDir = trendDir >= 0;
+                        trendDir = -1;
+                        itIsABearishPullback = true;
+                    }
+                    else if(highSeries[0] > previousCandleMaxPrice || max_in_opposite_bearish_direction_is_exceeded){
+                        changeDir = trendDir <= 0;
+                        trendDir = 1;
+                        itIsABullishPullback = true;
+                    }
+
+                    string typeOfSwing = trendDir > 0 ? "alcista" : "bajista";
+                    Print($"cambiando a retroceso {typeOfSwing} changeDir = {changeDir}");      
+                }
+                else if (currentCandleIsDoji){
+                    Print($"La vela actual #{CurrentBar} con el precio al alza ${highSeries[0]} y precio a la baja ${lowSeries[0]} es DOJI");
+
+                    if(!lastNonDojiIsBullish && (highSeries[0] > previousCandleMinPrice || lowSeries[0] < previousCandleMaxPrice)){
+                        itIsABullishPullback = true;
+                        changeDir = trendDir >= 0;
+                        trendDir = -1;
+                        if(changeDir)
+                            Print($"cambiando a retroceso bajista = {changeDir} trendDir = {trendDir}");       
+                    }
+                    // TODO validar si es mejor usar un else if
+                    if(lastNonDojiIsBullish && (lowSeries[0] < previousCandleMinPrice || highSeries[0] > previousCandleMaxPrice)){
+                        Print($"highSeries[0] de la vela doji {CurrentBar} ${highSeries[0]} > previousCandleMaxPrice ${previousCandleMaxPrice} = {highSeries[0] > previousCandleMaxPrice}");
+
+                        itIsABearishPullback = true;
+                        changeDir = trendDir <= 0;
+                        trendDir = 1;
+                        if(changeDir)       
+                            Print($"cambiando a retroceso alcista = {changeDir} trendDir = {trendDir}");       
+                    }
+
+
+                }
+
+                // Sí el mínimo de la vel aactual retrocede más que la anterior
+				if (changeDir)
+				{
+					if (trendDir > 0) // vela actual verde -> nuevo tramo al alza, anclar en el máximo entre [0] y [1]
+					{
+						addHigh = true;
+					}
+					else if(trendDir < 0) // vela actual roja -> nuevo tramo a la baja, anclar en el mínimo entre [0] y [1]
+					{
+						addLow = true;
+					}
+                    else if(currentCandleIsDoji){ // si la vela actual es Doji
+                        if(trendDir > 0) {addHigh = true;}
+                        else if(trendDir < 0) {addLow = true;}
+                    }
+
+                    currentSwingPrice = trendDir >= 0 ? highSeries[0] : lowSeries[0];
+                    //TODO establecer en el bloque correcto para evitar que se cancele actualización de vela en forma de V a otra vela en forma de V en casos donde hay cambio de dirección
+
+                    Print($"currentSwingPrice = ${currentSwingPrice}");
+				}
+				else
+				{
+                    // LÓGICA NORMAL: Seguir en la misma dirección con las validaciones existentes
+                    if (trendDir >= 0)
+                    {
+                        // Nueva lógica: solo actualizar si el mínimo no retrocede más Y el precio actual es mayor
+                        bool currentMinDoesNotRetreatFurtherThanPrevOne = lowSeries[0] >= lowSeries[1];
+                        bool currentPriceIsHigh = highSeries[0] > highSeries[1];
+
+                        Print($"currentMinDoesNotRetreatFurtherThanPrevOne: {currentMinDoesNotRetreatFurtherThanPrevOne}");
+                        Print($"currentPriceIsHigh: {currentPriceIsHigh}");
+                        Print($"highSeries[0]: ${highSeries[0]} > currentZigZagHigh: ${currentZigZagHigh} = {highSeries[0] > currentZigZagHigh}");
+                        
+                        if (currentMinDoesNotRetreatFurtherThanPrevOne && currentPriceIsHigh && highSeries[0] > currentZigZagHigh)
+                        {
+                            currentSwingPrice = highSeries[0];
+                            updateHigh = true;
+                            //lastPeakIsInAVShapeCandle = false; // Establece que el último pico NO fue en forma de V
+                            Print($"habilitando actualización al alza en la vela #{CurrentBar} con el precio ${currentSwingPrice}");
+                        }
+                    }
+                    else if (trendDir <= 0)
+                    {
+                        // Nueva lógica: solo actualizar si el máximo no retrocede más Y el precio actual es menor
+                        bool currentMinDoesNotRetreatFurtherThanPrevOne = highSeries[0] <= highSeries[1];
+                        bool currentPriceIsLower = lowSeries[0] < lowSeries[1];
+
+                        if (currentMinDoesNotRetreatFurtherThanPrevOne && currentPriceIsLower && lowSeries[0] < currentZigZagLow)
+                        {
+                            currentSwingPrice = lowSeries[0];
+                            updateLow = true;
+                            //lastPeakIsInAVShapeCandle = false; // Establece que el último pico NO fue en forma de V
+                            Print($"habilitando actualización a la baja en la vela #{CurrentBar} con el precio ${currentSwingPrice}");
+                        }
+                    }
+				}
+
+                if(lastCandleExceedsBothPeaks && highSeries[0] > vShapeHighPrice && lastCandleExceedsBothPeaksEndsInABullishPeak){
+                    // Fuerza a que updateHigh se actualice cuando el precio continua en la misma dirección alcista
+                    Print("lastCandleExceedsBothPeaks es verdadero, forzando actualizacion alcista");
+                    vShapeDrawn = false;
+                    updateHigh = true;
+
+                    Print("vShapeDrawn = false");
+                }
+                else if(lastCandleExceedsBothPeaks && lowSeries[0] < vShapeLowPrice && !lastCandleExceedsBothPeaksEndsInABullishPeak){
+                    // Fuerza a que updateLow se actualice cuando el precio continua en la misma dirección bajista
+                    Print("lastCandleExceedsBothPeaks es verdadero, forzando actualizacion bajista");
+                    vShapeDrawn = false;
+                    updateLow = true;
+
+                    Print("vShapeDrawn = false");
+                }
+
+                if (currentCandleExceedsBothPeaks)
+                {
+                    Print($"VELA SUPERA POR AMBOS PICOS: High actual {highSeries[0]} > High anterior {highSeries[1]} Y Low actual {lowSeries[0]} < Low anterior {lowSeries[1]}");
+                    Print($"lastSwingPrice: ${lastSwingPrice} < vShapeHighPrice: ${vShapeHighPrice} = {lastSwingPrice < vShapeHighPrice}");
+                    Print($"lastSwingPrice: ${lastSwingPrice} > vShapeLowPrice: ${vShapeLowPrice} = {lastSwingPrice > vShapeLowPrice}");
+                    // CASO ESPECIAL: Crear AMBOS puntos permanentes en OnBarUpdate
+                    vShapeHighPrice = highSeries[0];
+                    vShapeLowPrice = lowSeries[0];
+                    vShapeCandleIsBullish = currentCandleIsBullish; // Guardar el tipo de vela
+                    
+                    // Crear AMBOS puntos para que persistan
+                    //* Si al ejecutar el gráfico la primer vela es alcista y genera una superación en ambas direcciones no se trazara la línea en dos direcciones
+                    if(currentCandleIsBullish && lastSwingPrice > vShapeLowPrice){
+                        // Vela alcista: primero bajo, luego alto
+                        // Punto 1: Bajo
+                        currentSwingPrice = lowSeries[0];
+                        updateLow = true;
+                        
+                        // Punto 2: Alto (se creará después del procesamiento del bajo)
+                        addHigh = true;  // Usar addHigh para crear un nuevo punto alto
+                        trendDir = 1; // Actualiza la dirección de la línea como alcista
+                        
+                        //lastCandleExceedsBothPeaksEndsInABullishPeak = true;
+                        isCreatingVShape = true; // Activar lógica para dibujar en forma de V
+
+                        Print($"Creando V ALCISTA: Punto bajo {lowSeries[0]} y punto alto {highSeries[0]} - AMBOS PUNTOS PERMANENTES");
+                        Print($"updateLow = {updateLow}");
+                    }
+                    else if(!currentCandleIsBullish && lastSwingPrice < vShapeHighPrice) {
+                        // Vela bajista: primero alto, luego bajo
+                        // Punto 1: Alto
+                        currentSwingPrice = highSeries[0];
+                        updateHigh = true;
+                        
+                        // Punto 2: Bajo (se creará después del procesamiento del alto)
+                        addLow = true;  // Usar addLow para crear un nuevo punto bajo
+                        trendDir = -1; // Actualiza la dirección de la línea como bajista
+                        
+                        //lastCandleExceedsBothPeaksEndsInABullishPeak = false;
+                        isCreatingVShape = true; // Activar lógica para dibujar en forma de V
+
+                        Print($"Creando V BAJISTA: Punto alto {highSeries[0]} y punto bajo {lowSeries[0]} - AMBOS PUNTOS PERMANENTES");
+                        Print($"updateHigh = {updateHigh}");
+                    }
+                }
+                
+                if(lastCandleExceedsBothPeaks){
+                    Print("Vela posterior a superación del precio en dos direcciones");
+                    lastPeakIsInAVShapeCandle = true; // Establece que el último pico fue en forma de V
+                    lastCandleExceedsBothPeaksEndsInABullishPeak = previousCandleIsBullish;
+                    Print($"Estableciendo lastCandleExceedsBothPeaksEndsInABullishPeak en: {previousCandleIsBullish}");
+
+                }
+                // Actualizar precios máximos y mínimos alcanzados y guardar rompimientos pendientes a confirmar cuando un precio máximo y/o mínimo es superado o es el primer retroceso en dirección opuesta
+                if (isPriceGreatherThanCurrentMaxHighPrice || (itIsABullishPullback && !currentMaxHighWasCalculatedFirstTime))
                 {
                     //Actualiza el precio máximo alcanzado durante la sesión
                     currentMaxHighPrice = highSeries[0];
-                    resistenceZoneBreakoutPrice = currentMaxHighPrice;   
                     currentClosingHighPrice = Open[0] >= Close[0] ? Open[0] : Close[0];
+                    resistenceZoneBreakoutPrice = currentMaxHighPrice;   
+                    
+                    if(!currentMaxHighWasCalculatedFirstTime)
+                    Print($"Estableciendo precio máximo inicial - Max: ${currentMaxHighPrice} y con precio de inicio Close: ${currentClosingHighPrice} en la barra #{CurrentBar}");
+                    
+                    currentMaxHighWasCalculatedFirstTime = true;
                     Print($"El precio máximo acaba de ser roto con el valor ${currentMaxHighPrice} en la barra #{CurrentBar}");
-                    Print($"isHighBreakoutPendingToConfirmation = {isHighBreakoutPendingToConfirmation} ");
+                    //Print($"isHighBreakoutPendingToConfirmation = {isHighBreakoutPendingToConfirmation} ");
 
                     // Si no hay rompimientos al alza pendientes por completar añade un nuevo rompimiento a la cola de confirmación
-                    if (!isHighBreakoutPendingToConfirmation 
-                    //    && !isTheFirstSwingHigh
-                    )
+                    if (!isHighBreakoutPendingToConfirmation)
                     {
                         var newBreakout = new BreakoutCandidate
                         {
@@ -653,26 +858,28 @@ namespace NinjaTrader.NinjaScript.Indicators
                         isHighBreakoutPendingToConfirmation = true; 
                     }
 
-                    NinjaTrader.NinjaScript.DrawingTools.Draw.Text(
+                     NinjaTrader.NinjaScript.DrawingTools.Draw.Text(
                         this,              // La referencia al indicador o estrategia actual
                         "maxPriceBarText", // Un identificador único para el texto
-                        $"Bar: {CurrentBar} MaxPrice: {currentMaxHighPrice}$",
-                        // El texto a dibujar
+                        $"Bar: {CurrentBar} MaxPrice: ${highSeries[0]}", // El texto a dibujar
                         0, // El índice de la barra donde se dibuja (0 es la barra actual)
                         highSeries[0] + TickSize,  // (encima del máximo de la barra actual)
                         Brushes.Green  // El color del texto
                     );
-
-                    if (isTheFirstSwingHigh)
-                        isTheFirstSwingHigh = false;
-
                 }
-                if (isPriceLessThanCurrentMinLowPrice)
+
+                if (isPriceLessThanCurrentMinLowPrice || (itIsABearishPullback &&
+                !currentMinLowWasCalculatedFirstTime))
                 {
                     //Actualiza el precio máximo alcanzado durante la sesión
                     currentMinLowPrice = lowSeries[0];
-                    supportZoneBreakoutPrice = currentMinLowPrice;
                     currentClosingLowPrice = Close[0] <= Open[0] ? Close[0] : Open[0];
+                    supportZoneBreakoutPrice = currentMinLowPrice;
+
+                    if(!currentMinLowWasCalculatedFirstTime)
+                    Print($"Estableciendo precio mínimo inicial - Min: ${currentMinLowPrice} y con precio de inicio Close: ${currentClosingLowPrice} en la barra #{CurrentBar}");
+                    
+                    currentMinLowWasCalculatedFirstTime = true;
                     Print($"El precio mínimo acaba de ser roto con el valor ${currentMinLowPrice} en la barra #{CurrentBar}");
 
                     // Si no hay rompimientos a la baja pendientes por completar añade un nuevo rompimiento a la cola de confirmación
@@ -692,61 +899,18 @@ namespace NinjaTrader.NinjaScript.Indicators
                         pendingListOfBreakouts.Add(newBreakout);
                         isLowBreakoutPendingToConfirmation = true;
                     }
-                    
-                    NinjaTrader.NinjaScript.DrawingTools.Draw.Text(
+
+                     NinjaTrader.NinjaScript.DrawingTools.Draw.Text(
                         this,              // La referencia al indicador o estrategia actual
                         "minPriceBarText", // Un identificador único para el texto
-                        $"Bar: {CurrentBar} MinPrice: {currentMinLowPrice}$", // El texto a dibujar
-                        0,                 // El índice de la barra donde se dibuja (0 es la barra actual)
+                        $"Bar: {CurrentBar} MinPrice: ${currentMinLowPrice}", // El texto a dibujar
+                        0, // El índice de la barra donde se dibuja (0 es la barra actual)
                         lowSeries[0] + TickSize,  // (encima del máximo de la barra actual)
                         Brushes.DarkRed  // El color del texto
                     );
-                    
-
-                    if (isTheFirstSwingLow)
-                        isTheFirstSwingLow = false;
 
                 }
-
-                // Validación para evitar análisis de swings cuando no hay suficientes barras después del inicio del indicador
-                // Necesitamos al menos 2 barras después del startVerticalLineIndex para analizar swings correctamente
-                if (CurrentBar - startVerticalLineIndex < 2)
-                {
-
-                    double firstHigh = highSeries[1];
-                    double firstLow = lowSeries[1];
-                    double secondHigh = highSeries[0];
-                    double secondLow = lowSeries[0];
-                    /*
-                    if(secondHigh > firstHigh){
-
-                        zigZagHighZigZags[0] = secondHigh;
-                        currentZigZagHigh    = secondHigh;
-                        zigZagHighSeries[0]  = currentZigZagHigh;
-                        Value[0]             = currentZigZagHigh;
-
-                        trendDir = 1;
-                    }
-                    else if(secondLow < firstLow){
-
-                        zigZagLowZigZags[0] = secondLow;
-                        currentZigZagLow    = secondLow;
-                        zigZagLowSeries[0]  = currentZigZagLow;
-                        Value[0]            = currentZigZagLow;
-
-                        trendDir = -1;
-                    }                
-                    else{
-                        // No hay suficientes barras para analizar swings, saltar este análisis
-                        zigZagHighSeries[0] = currentZigZagHigh;
-                        zigZagLowSeries[0] = currentZigZagLow;
-                    }
-                    */
-
-                    Print($"Saltando análisis de swings - Barras insuficientes: CurrentBar={CurrentBar}, startVerticalLineIndex={startVerticalLineIndex}, diferencia={CurrentBar - startVerticalLineIndex}");
-                    //return;
-                }
-
+                
                 // Guardar rompimientos intermedios pendientes a confirmar
                 if (priceListsZones.Any())
                 {
@@ -809,7 +973,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                     .ToList();
                     priceListsZones = updatedZonesExtending;
                 }
-
+                
                 // Actualizar y guardar todos los precios de las siguientes 5 velas pendientes en las propiedades del rompimiento
                 foreach (var breakout in pendingListOfBreakouts)
                 {
@@ -854,155 +1018,8 @@ namespace NinjaTrader.NinjaScript.Indicators
                         }
                     }
                 }
-
-                if (is_a_maximum_in_the_opposite_direction_to_the_upward_movement)
-                {
-                    // Aquí se cumple el criterio: "Si la vela anterior es verde y la actual es roja"
-                    // Puedes usar esta condición para lógica adicional de máximos en dirección opuesta
-                    //Print($"Cambio de dirección detectado: Vela anterior verde (Close[1]={Close[1]}, Open[1]={Open[1]}), actual roja (Close[0]={Close[0]}, Open[0]={Open[0]})");
-                }
-
-                if (is_a_maximum_in_the_opposite_direction_to_the_downward_movement)
-                {
-                    // Aquí se cumple el criterio: "Si la vela anterior es roja y la actual es verde"
-                    // Puedes usar esta condición para lógica adicional de máximos en dirección opuesta
-                    //Print($"Cambio de dirección detectado: Vela anterior roja (Close[1]={Close[1]}, Open[1]={Open[1]}), actual verde (Close[0]={Close[0]}, Open[0]={Open[0]})");
-                }
                 
-                if(!previousCandleIsBullish){
-                    if(highSeries[0] > previousCandleMinPrice){
-                        changeDir = trendDir <= 0;
-                        trendDir = 1;
-                        itIsABullishPullback = true;
-                    }
-                    else if(lowSeries[0] < previousCandleMaxPrice || max_in_opposite_bullish_direction_is_exceeded){
-                        changeDir = trendDir >= 0;
-                        trendDir = -1;
-                        itIsABearishPullback = true;
-                    }
-
-                    //Print($"max_in_opposite_bullish_direction_is_exceeded = {max_in_opposite_bullish_direction_is_exceeded}");
-                    Print($"cambiando a retroceso alcista = {changeDir} trendDir = {trendDir}");       
-                }
-                else if(previousCandleIsBullish){
-
-                    if(lowSeries[0] < previousCandleMinPrice){
-                        changeDir = trendDir >= 0;
-                        trendDir = -1;
-                        itIsABearishPullback = true;
-                    }
-                    else if(highSeries[0] > previousCandleMaxPrice || max_in_opposite_bearish_direction_is_exceeded){
-                        changeDir = trendDir <= 0;
-                        trendDir = 1;
-                        itIsABullishPullback = true;
-                    }
-
-                    Print($"cambiando a retroceso bajista = {changeDir} trendDir = {trendDir}");       
-                }
-                else if (currentCandleIsDoji){
-                    Print($"La vela actual #{CurrentBar} con el precio al alza ${highSeries[0]} y precio a la baja ${lowSeries[0]} es DOJI");
-
-                    if(!lastNonDojiIsBullish && (highSeries[0] > previousCandleMinPrice || lowSeries[0] < previousCandleMaxPrice)){
-                        itIsABullishPullback = true;
-                        changeDir = trendDir >= 0;
-                        trendDir = -1;
-                        Print($"cambiando a retroceso bajista = {changeDir} trendDir = {trendDir}");       
-                    }
-                    // TODO validar si es mejor usar un else if
-                    if(lastNonDojiIsBullish && (lowSeries[0] < previousCandleMinPrice || highSeries[0] > previousCandleMaxPrice)){
-                        Print($"highSeries[0] de la vela doji {CurrentBar} ${highSeries[0]} > previousCandleMaxPrice ${previousCandleMaxPrice} = {highSeries[0] > previousCandleMaxPrice}");
-
-                        itIsABearishPullback = true;
-                        changeDir = trendDir <= 0;
-                        trendDir = 1;       
-                        Print($"cambiando a retroceso alcista = {changeDir} trendDir = {trendDir}");       
-                    }
-
-
-                }
-
-                // Sí el mínimo de la vel aactual retrocede más que la anterior
-				if (changeDir)
-				{
-					if (trendDir > 0) // vela actual verde -> nuevo tramo al alza, anclar en el máximo entre [0] y [1]
-					{
-						addHigh = true;
-					}
-					else if(trendDir < 0) // vela actual roja -> nuevo tramo a la baja, anclar en el mínimo entre [0] y [1]
-					{
-						
-						addLow = true;
-					}
-                    else if(currentCandleIsDoji){ // si la vela actual es Doji
-                        if(trendDir > 0) {addHigh = true;}
-                        else if(trendDir < 0) {addLow = true;}
-                    }
-
-                    currentSwingPrice = trendDir >= 0 ? Math.Max(highSeries[0], highSeries[1]) : Math.Min(lowSeries[0], lowSeries[1]);
-
-                    Print($"currentSwingPrice = ${currentSwingPrice}");
-				}
-				else
-				{
-                    // LÓGICA NORMAL: Seguir en la misma dirección con las validaciones existentes
-                    if (trendDir >= 0)
-                    {
-                        // Nueva lógica: solo actualizar si el mínimo no retrocede más Y el precio actual es mayor
-                        bool currentMinDoesNotRetreatFurtherThanPrevOne = lowSeries[0] >= lowSeries[1];
-                        bool currentPriceIsHigh = highSeries[0] > highSeries[1];
-                        
-                        if (currentMinDoesNotRetreatFurtherThanPrevOne && currentPriceIsHigh && highSeries[0] > currentZigZagHigh)
-                        {
-                            currentSwingPrice = highSeries[0];
-                            updateHigh = true;
-                        }
-                    }
-                    else if (trendDir <= 0)
-                    {
-                        // Nueva lógica: solo actualizar si el máximo no retrocede más Y el precio actual es menor
-                        bool currentMinDoesNotRetreatFurtherThanPrevOne = highSeries[0] <= highSeries[1];
-                        bool currentPriceIsLower = lowSeries[0] < lowSeries[1];
-
-                        Print($"Validando condición para actualizar el updateLow = {currentMinDoesNotRetreatFurtherThanPrevOne && currentPriceIsLower && lowSeries[0] < currentZigZagLow}");
-
-                        Print($"Validado si el precio mínimo actual ${lowSeries[0]} es menor al último punto bajista guardado ${currentZigZagLow}: {lowSeries[0] < currentZigZagLow}");
-
-                        if (currentMinDoesNotRetreatFurtherThanPrevOne && currentPriceIsLower && lowSeries[0] < currentZigZagLow)
-                        {
-                            currentSwingPrice = lowSeries[0];
-                            updateLow = true;
-                        }
-                    }
-				}
-
-                if (currentCandleExceedsBothPeaks)
-                {
-                    Print($"VELA SUPERA POR AMBOS PICOS: High actual {highSeries[0]} > High anterior {highSeries[1]} Y Low actual {lowSeries[0]} < Low anterior {lowSeries[1]}");
-                    // CASO ESPECIAL: Crear AMBOS puntos permanentes en OnBarUpdate
-                    isCreatingVShape = true;
-                    vShapeHighPrice = highSeries[0];
-                    vShapeLowPrice = lowSeries[0];
-                    
-                    // Crear AMBOS puntos para que persistan
-                    // Punto 1: Alto
-                    currentSwingPrice = highSeries[0];
-                    updateHigh = true;
-                    
-                    // Punto 2: Bajo (se creará después del procesamiento del alto)
-                    addLow = true;  // Usar addLow para crear un nuevo punto bajo
-                    trendDir = -1; // Actualiza la dirección de la línea como bajista
-                    
-                    Print($"Creando V: Punto alto {highSeries[0]} y punto bajo {lowSeries[0]} - AMBOS PUNTOS PERMANENTES");
-                }
-                if(lastCandleExceedsBothPeaks && lowSeries[0] < vShapeLowPrice){
-                    // Fuerza a que updateLow se actualice cuando el precio continua en la misma dirección bajista
-                    Print("lastCandleExceedsBothPeaks es verdadero, forzando actualizacion bajista");
-                    vShapeDrawn = false;
-                    updateLow = true;
-                }
-
                 Print($"Pending breakouts candidates before event = {pendingListOfBreakouts.Count()}");
-                
                 // Realizar validación de confirmación de los rompimientos pendientes por tipo de rompimiento
                 if (pendingListOfBreakouts.Any())
                 {
@@ -1348,7 +1365,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
                     // Eliminar elementos completados   
                     pendingListOfBreakouts.RemoveAll(breakout => breakout.BreakoutCompleted);
-                    Print($"Pending breakouts candidates after event = {pendingListOfBreakouts.Count()}");
+                    //Print($"Pending breakouts candidates after event = {pendingListOfBreakouts.Count()}");
                 }
 
                 // Comprobar si la vela actual no supera a la anterior en su maximo o mínimo
@@ -1364,7 +1381,15 @@ namespace NinjaTrader.NinjaScript.Indicators
 
                 if (addHigh || addLow || updateHigh || updateLow)
                 {
-                    if (updateHigh && lastSwingIdx >= 0 && !vShapeDrawn)
+                    Print($"Validando !vShapeDrawn: {!vShapeDrawn}");
+                    Print($"Validando lastPeakIsInAVShapeCandle: {lastPeakIsInAVShapeCandle}");
+                    Print($"Validando lastCandleExceedsBothPeaksEndsInABullishPeak: {lastCandleExceedsBothPeaksEndsInABullishPeak}");
+
+                    Print($"Validando condición para actualizar zig zag line al alza: {updateHigh && lastSwingIdx >= 0 && (!vShapeDrawn || lastPeakIsInAVShapeCandle && lastCandleExceedsBothPeaksEndsInABullishPeak && lastSwingPrice < highSeries[0])}");
+                    Print($"Validando condición para actualizar zig zag line a la baja: {updateLow && lastSwingIdx >= 0 && (!vShapeDrawn || lastPeakIsInAVShapeCandle && !lastCandleExceedsBothPeaksEndsInABullishPeak && lastSwingPrice > lowSeries[0])}");
+
+                    // TODO validar si la inicialización de lastCandleExceedsBothPeaksEndsInABullishPeak en false antes de que se procesen suficientes velas al inicio del script causa algun problema 
+                    if (updateHigh && lastSwingIdx >= 0 && (!vShapeDrawn || lastPeakIsInAVShapeCandle && lastCandleExceedsBothPeaksEndsInABullishPeak && lastSwingPrice < highSeries[0]))
                     {
                         // Para updates: eliminar completamente el punto anterior y crear línea directa al nuevo punto
                         int barsToReset = CurrentBar - lastSwingIdx;
@@ -1374,10 +1399,9 @@ namespace NinjaTrader.NinjaScript.Indicators
                         Value.Reset(barsToReset);
                         
                         Print($"Actualizando movimiento alcista de las últimas {barsToReset} velas");
-                        // NO crear punto intermedio - la línea se dibujará directamente desde el punto anterior al nuevo
-                        // El punto anterior ya existe en lastSwingIdx, solo necesitamos el nuevo punto
                     }
-                    if (updateLow && lastSwingIdx >= 0 && !vShapeDrawn)
+                    // TODO evitar que la línea se actualice cuando el último pico se encuentra en una vela alcista que supera en ambas direcciones y la vela actual también lo es
+                    else if (updateLow && lastSwingIdx >= 0 && (!vShapeDrawn || lastPeakIsInAVShapeCandle && !lastCandleExceedsBothPeaksEndsInABullishPeak && lastSwingPrice > lowSeries[0]))
                     {
                         // Para updates: eliminar completamente el punto anterior y crear línea directa al nuevo punto
                         int barsToReset = CurrentBar - lastSwingIdx;
@@ -1387,34 +1411,73 @@ namespace NinjaTrader.NinjaScript.Indicators
                         Value.Reset(barsToReset);
 
                         Print($"Actualizando movimiento bajista de las últimas {barsToReset} velas");
-                        
-                        // NO crear punto intermedio - la línea se dibujará directamente desde el punto anterior al nuevo
-                        // El punto anterior ya existe en lastSwingIdx, solo necesitamos el nuevo punto
                     }
 
                     if (addHigh || updateHigh)
                     {
-                        zigZagHighZigZags[0] = currentSwingPrice;
-                        currentZigZagHigh    = currentSwingPrice;
-                        zigZagHighSeries[0]  = currentZigZagHigh;
-                        Value[0]             = currentZigZagHigh;
+                        
+                        if(isCreatingVShape && vShapeCandleIsBullish){
+                            zigZagLowZigZags[0] = currentSwingPrice;
+                            currentZigZagLow    = currentSwingPrice;
+                            zigZagLowSeries[0]  = currentZigZagLow;
+                            Value[0]            = currentZigZagLow;
+                            Print($"Guardando precio bajo en vela alcista que supera en ambas direcciones ${currentSwingPrice}");
+                        }
+                        else{
+                            zigZagHighZigZags[0] = currentSwingPrice;
+                            currentZigZagHigh    = currentSwingPrice;
+                            zigZagHighSeries[0]  = currentZigZagHigh;
+                            Value[0]             = currentZigZagHigh;
+                        }
+                        // Guardar el tipo de vela si estamos creando V
+                        if (isCreatingVShape)
+                        {
+                            vShapeCandleTypes[0] = vShapeCandleIsBullish;
+                        }
+
+                        lastPeakIsInAVShapeCandle = false; // Establece que el último pico NO fue en forma de V
                     }
                     if (addLow || updateLow)
                     {
-                        // CASO ESPECIAL: Si estamos creando V, usar el precio bajo guardado
-                        double priceToUse = isCreatingVShape ? vShapeLowPrice : currentSwingPrice;
+                        // CASO ESPECIAL: Si estamos creando V, usar el precio determinado por el tipo de vela
+                        double priceToUse = isCreatingVShape ? 
+                        (vShapeCandleIsBullish ? vShapeHighPrice : vShapeLowPrice) : 
+                        currentSwingPrice;
+
+                        if(isCreatingVShape && vShapeCandleIsBullish){
+                            zigZagHighZigZags[0] = priceToUse;
+                            currentZigZagHigh    = priceToUse;
+                            zigZagHighSeries[0]  = currentZigZagHigh;
+                            Value[0]             = currentZigZagHigh;
+
+                            Print($"Guardando precio alto en vela alcista que supera en ambas direcciones ${priceToUse}");
+                        }
+                        else{
+                            zigZagLowZigZags[0] = priceToUse;
+                            currentZigZagLow    = priceToUse;
+                            zigZagLowSeries[0]  = currentZigZagLow;
+                            Value[0]            = currentZigZagLow;
+                        }
                         
-                        zigZagLowZigZags[0] = priceToUse;
-                        currentZigZagLow    = priceToUse;
-                        zigZagLowSeries[0]  = currentZigZagLow;
-                        Value[0]            = currentZigZagLow;
+                        // Guardar el tipo de vela si estamos creando V
+                        if (isCreatingVShape)
+                        {
+                            vShapeCandleTypes[0] = vShapeCandleIsBullish;
+                        }
+
+                        lastPeakIsInAVShapeCandle = false; // Establece que el último pico NO fue en forma de V
                     }
 
                     // Actualizar índices - si tenemos ambos puntos, usar el bajo como referencia
-                    if (isCreatingVShape && (addLow || updateLow))
+                    if (isCreatingVShape && addLow)
                     {
                         lastSwingIdx = CurrentBar;
                         lastSwingPrice = vShapeLowPrice;  // Usar el precio bajo como referencia
+                    }
+                    else if(isCreatingVShape && addHigh)
+                    {
+                        lastSwingIdx = CurrentBar;
+                        lastSwingPrice = vShapeHighPrice;  // Usar el precio alto como referencia
                     }
                     else
                     {
@@ -1426,57 +1489,13 @@ namespace NinjaTrader.NinjaScript.Indicators
                     if (vShapeDrawn)
                     {
                         vShapeDrawn = false;
-                        Print("vShapeDrawn reseteado para la próxima vela");
+                        Print("vShapeDrawn = false");
                     }
                 }
-
-                // Mostrar línea en tiempo real en la barra actual, pero solo si no hubo swing confirmado
-                /*if (!addHigh && !addLow && !updateHigh && !updateLow)
-                {
-                    // Solo mostrar la línea proyectada en la barra actual sin confirmar el swing
-                    // Pero solo si cumple las condiciones para evitar movimientos horizontales
-                    if (trendDir <= 0)
-                    {
-                        // En tendencia alcista, mostrar el máximo actual solo si no hay retroceso significativo
-                        bool minActualNoRetrocede = lowSeries[0] >= lowSeries[1];
-                        if (minActualNoRetrocede)
-                        {
-                            zigZagHighSeries[0] = highSeries[0];
-                            zigZagLowSeries[0]  = currentZigZagLow;
-                            Value[0]            = highSeries[0];
-                        }
-                        else
-                        {
-                            // Mantener el último valor confirmado
-                            zigZagHighSeries[0] = currentZigZagHigh;
-                            zigZagLowSeries[0]  = currentZigZagLow;
-                            Value[0]            = currentZigZagHigh;
-                        }
-                    }
-                    else // trendDir >= 0
-                    {
-                        // En tendencia bajista, mostrar el mínimo actual solo si no hay retroceso significativo
-                        bool maxActualNoRetrocede = highSeries[0] <= highSeries[1];
-                        if (maxActualNoRetrocede)
-                        {
-                            zigZagLowSeries[0]  = lowSeries[0];
-                            zigZagHighSeries[0] = currentZigZagHigh;
-                            Value[0]            = lowSeries[0];
-                        }
-                        else
-                        {
-                            // Mantener el último valor confirmado
-                            zigZagLowSeries[0]  = currentZigZagLow;
-                            zigZagHighSeries[0] = currentZigZagHigh;
-                            Value[0]            = currentZigZagLow;
-                        }
-                    }
-                }
-                */
 
                 if (startIndex == int.MinValue && (zigZagHighZigZags.IsValidDataPoint(0) && zigZagHighZigZags[0] != zigZagHighZigZags[1] || zigZagLowZigZags.IsValidDataPoint(0) && zigZagLowZigZags[0] != zigZagLowZigZags[1]))
                     startIndex = CurrentBar - (Calculate == Calculate.OnBarClose ? 2 : 1);
-                    
+
                 // Dentro de OnBarUpdate, después de la activación en tiempo real (donde uses startVerticalLineIndex):
                 /*if (isRealtimeZigZagActive && !initialZigZagLineDrawn && CurrentBar == startVerticalLineIndex + 1)
                 {
@@ -1495,8 +1514,19 @@ namespace NinjaTrader.NinjaScript.Indicators
                     initialZigZagLineDrawn = true;
                     // NO accedas aquí a ChartControl, ni a chartScale, ni a PathGeometry, ni nada visual directo.
                 }*/
+                
+                /*
+                for(int index = zigZagLowZigZags.Count; index > 0; index--){
+                    Print($"zigZagLowZigZags {index}: {zigZagLowZigZags[index]}");
+                }
 
-                Print($"Pasando a vela #{CurrentBar + 1}");
+                for(int index = zigZagHighZigZags.Count; index > 0; index--){
+                    Print($"zigZagHighZigZags {index}: {zigZagHighZigZags[index]}");
+                }
+                */
+
+                Print($"Pasando a vela #{CurrentBar + 1}");  
+
             }
             catch (Exception ex)
             {
@@ -1559,6 +1589,53 @@ namespace NinjaTrader.NinjaScript.Indicators
         private bool IsPriceGreater(double a, double b)
         {
             return a.ApproxCompare(b) > 0;
+        }
+
+        // Método auxiliar (puede ser privado en tu indicador)
+        private void CurrentCandleExcedsZonePrice(Zone zone, double candlePrice, BreakoutCandidate.BreakoutType typeOfBreakout)
+        {
+            Print("Generando rompimiento de zona intermedia dentro de OnRender");
+            if(typeOfBreakout.Equals(BreakoutCandidate.BreakoutType.Bullish)){
+                // Si la vela que genera el retroceso actual supera el el precio de apertura de la zona genera el rompimiento y no hay rompimientos pendientes por confirmación en esta zona
+                if(candlePrice > zone.MaxOrMinPrice && !zone.IsBreakoutPendingToConfirmation){
+                    
+                    var newBreakout = new BreakoutCandidate
+                    {
+                        MaxBreakoutPrice = currentSwingPrice,
+                        BreakoutBarIndex = CurrentBar,
+                        Type = typeOfBreakout,
+                        IsIntermediateBreakout = true
+                    };
+
+                    Print($"se ha generado un rompimiento de zona alcista intermedia en la barra: {newBreakout.BreakoutBarIndex} - con el precio: ${newBreakout.MaxBreakoutPrice}");
+
+                    pendingListOfBreakouts.Add(newBreakout);
+                    zone.IsBreakoutPendingToConfirmation = true;
+                
+                }
+                
+                Print($"último punto al alza guardado 'currentSwingPrice' ${currentSwingPrice}");
+            }
+            else if(typeOfBreakout.Equals(BreakoutCandidate.BreakoutType.Bearish)){
+                // Si la vela que genera el retroceso actual supera el el precio de apertura de la zona genera el rompimiento y no hay rompimientos pendientes por confirmación en esta zona
+                Print($"candlePrice:${candlePrice} < zone.MaxOrMinPrice:${zone.MaxOrMinPrice} ? {candlePrice < zone.MaxOrMinPrice}");
+                if(candlePrice < zone.MaxOrMinPrice && !zone.IsBreakoutPendingToConfirmation){
+                    
+                    var newBreakout = new BreakoutCandidate
+                    {
+                        MaxBreakoutPrice = currentSwingPrice,
+                        BreakoutBarIndex = CurrentBar,
+                        Type = typeOfBreakout,
+                        IsIntermediateBreakout = true
+                    };
+
+                    Print($"se ha generado un rompimiento de zona bajista intermedia en la barra: {newBreakout.BreakoutBarIndex} - con el precio: ${newBreakout.MaxBreakoutPrice}");
+
+                    pendingListOfBreakouts.Add(newBreakout);
+                    zone.IsBreakoutPendingToConfirmation = true;
+                
+                }
+            }
         }
 
         // Valida si un precio anterior es superior a un precio actual
@@ -1710,461 +1787,498 @@ namespace NinjaTrader.NinjaScript.Indicators
                     continue;
                 
                 // Valida si el swing actual va alza o a la baja (puntos fijos)
+                
                 bool isHigh = zigZagHighZigZags.IsValidDataPointAt(idx);
                 bool isLow  = zigZagLowZigZags.IsValidDataPointAt(idx);
 
+                // TODO eliminar para no forzar la actualización de los puntos cuando no hay retrocesos
                 // Si estamos en la barra visible más reciente, proyectar la punta aunque no haya punto fijo
-                int lastPlotIdx = Bars.Count - 1 - (Calculate == NinjaTrader.NinjaScript.Calculate.OnBarClose ? 1 : 0);
-                bool projectHighTip = (idx == lastPlotIdx) && trendDir <= 0;
-                bool projectLowTip  = (idx == lastPlotIdx) && trendDir >= 0;
+                //int lastPlotIdx = Bars.Count - 1 - (Calculate == NinjaTrader.NinjaScript.Calculate.OnBarClose ? 1 : 0);
+                //bool projectHighTip = (idx == lastPlotIdx) && trendDir <= 0;
+                //bool projectLowTip  = (idx == lastPlotIdx) && trendDir >= 0;
 
                 //Print("Antes de validación para dibujar zona");
 
-                if (!isHigh && !isLow && !projectHighTip && !projectLowTip)
-                    continue;
+                //* Posiblemente reemplazandolo por OR dibuje la línea desde la barra actual
+                if (isHigh || isLow){
+                    //Print("Después de validación para dibujar zona");
 
-                //Print("Después de validación para dibujar zona");
+                    double candlestickBodyValue = isHigh ? 
+                    zigZagHighZigZags.GetValueAt(idx) : 
+                    zigZagLowZigZags.GetValueAt(idx);
 
-                double candlestickBodyValue =
-                    isHigh         ? zigZagHighZigZags.GetValueAt(idx) :
-                    isLow          ? zigZagLowZigZags.GetValueAt(idx)  :
-                    projectHighTip ? currentZigZagHigh                 :
-                                    currentZigZagLow;
-
-                // Lógica para crear nuevas zonas y actualizar extendimientos de zonas creadas
-                if (isHighZoneExtended && priceListsZones.Any())
-                {
-
-                    // Obtiene la zona de resistencia con el mayor valor máximo alcanzado
-                    currentZone = priceListsZones
-                        .Where(zone => zone.Type == Zone.ZoneType.Resistance)
-                        .OrderByDescending(zone => zone.MaxOrMinPrice)
-                        .FirstOrDefault();
-
-                    if (currentZone != null)
+                    // Lógica para crear nuevas zonas y actualizar extendimientos de zonas creadas
+                    if (isHighZoneExtended && priceListsZones.Any())
                     {
-                        currentZone.MaxOrMinPrice = resistenceZoneBreakoutPrice;
 
-                        Print("extendiendo región de la resistencia");
+                        // Obtiene la zona de resistencia con el mayor valor máximo alcanzado
+                        currentZone = priceListsZones
+                            .Where(zone => zone.Type == Zone.ZoneType.Resistance)
+                            .OrderByDescending(zone => zone.MaxOrMinPrice)
+                            .FirstOrDefault();
 
-                        Print($"extendiendo resistencia = {currentZone.Id} precio de cierre: ${currentZone.ClosePrice} precio maximo: ${currentZone.MaxOrMinPrice}");
+                        if (currentZone != null)
+                        {
+                            currentZone.MaxOrMinPrice = resistenceZoneBreakoutPrice;
 
-                        // Dibujar zonas de soporte y resistencia
-                        NinjaTrader.NinjaScript.DrawingTools.Draw.RegionHighlightY(
-                            this,                         // Contexto del indicador o estrategia
-                            "RegionHighLightY" + currentZone.Id, // Nombre único para la región
-                            currentZone.ClosePrice,        // Nivel de precio inferior
-                            currentZone.MaxOrMinPrice,     // Nivel de precio superior
-                            currentZone.HighlightBrush     // Pincel para el color de la región
+                            Print("extendiendo región de la resistencia");
+
+                            Print($"extendiendo resistencia = {currentZone.Id} precio de cierre: ${currentZone.ClosePrice} precio maximo: ${currentZone.MaxOrMinPrice}");
+
+                            // Dibujar zonas de soporte y resistencia
+                            NinjaTrader.NinjaScript.DrawingTools.Draw.RegionHighlightY(
+                                this,                         // Contexto del indicador o estrategia
+                                "RegionHighLightY" + currentZone.Id, // Nombre único para la región
+                                currentZone.ClosePrice,        // Nivel de precio inferior
+                                currentZone.MaxOrMinPrice,     // Nivel de precio superior
+                                currentZone.HighlightBrush     // Pincel para el color de la región
+                            );
+                            //: Actualizar máximo preció alcanzado
+                            CalculateCurrentMinOrMaxPrice();
+                            //: Actualizar zona actual 
+                            List<Zone> updateMaxOrMinPriceZone =
+                            priceListsZones.Select(zone =>
+                            {
+                                if (zone.Id == currentZone.Id)
+                                {
+                                    zone.MaxOrMinPrice = currentZone.MaxOrMinPrice;
+                                }
+                                return zone;
+                            }).ToList();
+
+                            priceListsZones = updateMaxOrMinPriceZone;
+                        }
+                        isHighZoneExtended = false;
+                    }
+                    else if (isBullishBreakoutConfirmed)
+                    {
+
+                        currentZone = new Zone(
+                            Zone.ZoneType.Resistance,
+                            currentClosingHighPrice,
+                            resistenceZoneBreakoutPrice
                         );
 
-                        lastMaxHighPrice = currentMaxHighPrice;
-                        lastClosingHighPrice = currentClosingHighPrice;
+                        priceListsZones.Add(currentZone);
 
-                        //: Actualizar máximo preció alcanzado
-                        CalculateCurrentMinOrMaxPrice();
-                        //: Actualizar zona actual 
-                        List<Zone> updateMaxOrMinPriceZone =
-                        priceListsZones.Select(zone =>
+                        List<Zone> updatePriceListZones = priceListsZones.Select(zone =>
                         {
-                            if (zone.Id == currentZone.Id)
+
+                            if (zone.IsResistenceZone())
                             {
-                                zone.MaxOrMinPrice = currentZone.MaxOrMinPrice;
+                                if (
+                                    zone.MaxOrMinPrice == resistenceZoneBreakoutPrice
+                                )
+                                {
+
+                                    Print($"Generando resistencia: {zone.Id} precio de cierre: {zone.ClosePrice} y precio de maximo: {zone.MaxOrMinPrice}");
+                                    // Dibujar zonas de soporte 
+                                    NinjaTrader.NinjaScript.DrawingTools.Draw.RegionHighlightY(
+                                        this,                    // Contexto del indicador o estrategia
+                                        "RegionHighLightY" + zone.Id, // Nombre único para la región
+                                        zone.ClosePrice,              // Nivel de precio inferior
+                                        zone.MaxOrMinPrice,           // Nivel de precio superior
+                                        zone.HighlightBrush      // Pincel para el color de la región
+                                    );
+                                }
+                                else if (
+                                    zone.MaxOrMinPrice < resistenceZoneBreakoutPrice
+                                )
+                                {
+                                    Print(
+                                        $"La zona {zone.Id} está siendo convertida a soporte " +
+                                        $"con el precio máximo de: {zone.ClosePrice} y el " +
+                                        $"precio de cierre: {zone.MaxOrMinPrice}"
+                                    );
+
+                                    double lastPriceClose = zone.ClosePrice;
+                                    double lastMaxOrMinPrice = zone.MaxOrMinPrice;
+
+                                    zone.MaxOrMinPrice = lastPriceClose;
+                                    zone.ClosePrice = lastMaxOrMinPrice;
+
+                                    zone.IsResistenceBreakout = true;
+                                    zone.IsIntermediateZone = true;
+                                    zone.Type = Zone.ZoneType.Support;
+                                    zone.HighlightBrush = Brushes.Red.Clone();
+                                    zone.HighlightBrush.Opacity = 0.3;
+
+                                    RemoveDrawObject("RegionHighLightY" + zone.Id);                                
+
+                                    NinjaTrader.NinjaScript.DrawingTools.Draw.RegionHighlightY(
+                                        this,                   // Contexto del indicador o estrategia
+                                        "RegionLowLightY" + zone.Id,  // Nombre único para la región
+                                        zone.ClosePrice,              // Nivel de precio superior
+                                        zone.MaxOrMinPrice,           // Nivel de precio inferior
+                                        zone.HighlightBrush        // Pincel para el color de la región
+                                    );
+                                    // Si la vela que genera el retroceso actual supera el el precio de cierre de la zona genera el rompimiento
+                                    CurrentCandleExcedsZonePrice(zone, currentSwingPrice, BreakoutCandidate.BreakoutType.Bearish);
+
+                                }
                             }
+
                             return zone;
-                        }).ToList();
 
-                        priceListsZones = updateMaxOrMinPriceZone;
+                        })
+                        .ToList();
+
+                        priceListsZones = updatePriceListZones;
+                        CalculateCurrentMinOrMaxPrice();
+                        //Print("actualizando maxHighBreakBar");
+                        isBullishBreakoutConfirmed = false;
+                        //isABullishPullback = false;
                     }
-                    isHighZoneExtended = false;
-                }
-                else if (isBullishBreakoutConfirmed)
-                {
-
-                    currentZone = new Zone(
-                        Zone.ZoneType.Resistance,
-                        currentClosingHighPrice,
-                        resistenceZoneBreakoutPrice
-                    );
-
-                    priceListsZones.Add(currentZone);
-
-                    List<Zone> updatePriceListZones = priceListsZones.Select(zone =>
+                    
+                    if (isLowZoneExtended && priceListsZones.Any())
                     {
+                        // Obtiene la zona del soporte con el menor valor máximo alcanzado
+                        currentZone = priceListsZones
+                            .Where(zone => zone.Type == Zone.ZoneType.Support)
+                            .OrderBy(zone => zone.MaxOrMinPrice)
+                            .FirstOrDefault();
 
-                        if (zone.IsResistenceZone())
+                        if (currentZone != null)
                         {
-                            if (
-                                zone.MaxOrMinPrice == resistenceZoneBreakoutPrice
-                            )
+                            currentZone.MaxOrMinPrice = supportZoneBreakoutPrice;
+
+                            Print("extendiendo región del soporte...");
+
+                            Print($"extendiendo soporte = {currentZone.Id} precio de cierre: ${currentZone.ClosePrice} precio minimo: ${currentZone.MaxOrMinPrice}");
+
+                            // Dibujar zonas de soporte y resistencia
+                            NinjaTrader.NinjaScript.DrawingTools.Draw.RegionHighlightY(
+                                this, // Contexto del indicador o estrategia
+                                "RegionLowLightY" + currentZone.Id, // Nombre único para la región
+                                currentZone.MaxOrMinPrice,     // Nivel de precio inferior
+                                currentZone.ClosePrice,        // Nivel de precio superior
+                                currentZone.HighlightBrush     // Pincel para el color de la región
+                            );
+
+
+                            //: Actualizar mínimo preció alcanzado
+                            CalculateCurrentMinOrMaxPrice();
+
+                            //: Actualizar zona actual 
+                            List<Zone> updateMaxOrMinPriceZone =
+                            priceListsZones.Select(zone =>
                             {
+                                if (zone.Id == currentZone.Id)
+                                {
+                                    zone.MaxOrMinPrice = currentZone.MaxOrMinPrice;
+                                }
+                                return zone;
+                            }).ToList();
+                            priceListsZones = updateMaxOrMinPriceZone;
+                        }
+                        isLowZoneExtended = false;
+                    }
+                    else if (isBearishBreakoutConfirmed)
+                    {
+                        Print("Generando soporte");
 
-                                Print($"Generando resistencia: {zone.Id} precio de cierre: {zone.ClosePrice} y precio de maximo: {zone.MaxOrMinPrice}");
-                                // Dibujar zonas de soporte 
-                                NinjaTrader.NinjaScript.DrawingTools.Draw.RegionHighlightY(
-                                    this,                    // Contexto del indicador o estrategia
-                                    "RegionHighLightY" + zone.Id, // Nombre único para la región
-                                    zone.ClosePrice,              // Nivel de precio inferior
-                                    zone.MaxOrMinPrice,           // Nivel de precio superior
-                                    zone.HighlightBrush      // Pincel para el color de la región
-                                );
-                            }
-                            else if (
-                                zone.MaxOrMinPrice < resistenceZoneBreakoutPrice
-                            )
+                        currentZone = new Zone(
+                            Zone.ZoneType.Support,
+                            currentClosingLowPrice,
+                            supportZoneBreakoutPrice
+                        );
+
+                        priceListsZones.Add(currentZone);
+
+                        List<Zone> updatePriceListZones = priceListsZones.Select(zone =>
+                        {
+
+                            if (!zone.IsResistenceZone())
                             {
-                                Print(
-                                    $"La zona {zone.Id} está siendo convertida a soporte " +
-                                    $"con el precio máximo de: {zone.ClosePrice} y el " +
-                                    $"precio de cierre: {zone.MaxOrMinPrice}"
-                                );
-
-                                double lastPriceClose = zone.ClosePrice;
-                                double lastMaxOrMinPrice = zone.MaxOrMinPrice;
-
-                                zone.MaxOrMinPrice = lastPriceClose;
-                                zone.ClosePrice = lastMaxOrMinPrice;
-
-                                zone.IsResistenceBreakout = true;
-                                zone.IsIntermediateZone = true;
-                                zone.Type = Zone.ZoneType.Support;
-                                zone.HighlightBrush = Brushes.Red.Clone();
-                                zone.HighlightBrush.Opacity = 0.3;
-
-                                RemoveDrawObject("RegionHighLightY" + zone.Id);
-
                                 
+                                if (
+                                    zone.MaxOrMinPrice == supportZoneBreakoutPrice
+                                )
+                                {
 
+                                    Print($"Generando soporte: {zone.Id} precio de cierre: {zone.ClosePrice} y precio de apertura: {zone.MaxOrMinPrice}");
+
+                                    // Dibujar zonas de soporte 
+                                    NinjaTrader.NinjaScript.DrawingTools.Draw.RegionHighlightY(
+                                        this,                 // Contexto del indicador o estrategia
+                                        "RegionLowLightY" + zone.Id,  // Nombre único para la región
+                                        zone.MaxOrMinPrice,           // Nivel de precio inferior
+                                        zone.ClosePrice,              // Nivel de precio superior
+                                        zone.HighlightBrush     // Pincel para el color de la región
+                                    );
+                                }
+                                else if (
+                                    zone.MaxOrMinPrice > supportZoneBreakoutPrice
+                                )
+                                {
+                                    Print(
+                                    $"La zona {zone.Id} está siendo convertida a resistencia " +
+                                    $"con el precio mínimo de: {zone.MaxOrMinPrice} y el " +
+                                    $"precio de cierre: {zone.ClosePrice}"
+                                    );
+
+                                    Print($"último punto al alza guardado 'currentSwingPrice' ${currentSwingPrice}");
+
+                                    double lastMaxOrMinPrice = zone.MaxOrMinPrice;
+                                    double lastPriceClose = zone.ClosePrice;
+
+                                    zone.ClosePrice = lastMaxOrMinPrice;
+                                    zone.MaxOrMinPrice = lastPriceClose;
+
+                                    zone.IsSupportBreakout = true;
+                                    zone.IsIntermediateZone = true;
+                                    zone.Type = Zone.ZoneType.Resistance;
+                                    zone.HighlightBrush = Brushes.Green.Clone();
+                                    zone.HighlightBrush.Opacity = 0.3;
+
+                                    RemoveDrawObject("RegionLowLightY" + zone.Id);
+
+                                    NinjaTrader.NinjaScript.DrawingTools.Draw.RegionHighlightY(
+                                        this,                    // Contexto del indicador o estrategia
+                                        "RegionHighLightY" + zone.Id, // Nombre único para la región
+                                        zone.ClosePrice,              // Nivel de precio inferior
+                                        zone.MaxOrMinPrice,           // Nivel de precio superior
+                                        zone.HighlightBrush       // Pincel para el color de la región
+                                    );
+
+                                    // Si la vela que genera el retroceso actual supera el el precio de apertura de la zona genera el rompimiento
+                                    CurrentCandleExcedsZonePrice(zone, currentSwingPrice, BreakoutCandidate.BreakoutType.Bullish);
+                                }
+                            }
+
+                            return zone;
+
+                        })
+                        .ToList();
+                        priceListsZones = updatePriceListZones;
+
+                        //}
+                        //lastMinLowPrice = currentMinLowPrice;
+                        //Print($"lastMinLowPrice after update = {lastMinLowPrice}");
+                        CalculateCurrentMinOrMaxPrice();
+                        //Print("actualizando minLowBreakBar");
+                        isBearishBreakoutConfirmed = false;
+                        // isABearishPullback = false;
+
+                    }
+
+                    // redibujar precios de extendimientos de zonas intermedias
+                    if (redrawHighZoneIsRequired)
+                    {
+                        Print("redibujando dimensiones de la zona intermedia al alza");
+                        List<Zone> updatePriceListsZones = priceListsZones.Select(zone =>
+                        {
+                            if (zone.IsResistenceZone() && zone.RedrawHighZoneIsRequired)
+                            {
+                                Print($"redibujando resistencia = {zone.Id} ClosePrice = {zone.ClosePrice} MaxOrMinPrice = {zone.MaxOrMinPrice}");
                                 NinjaTrader.NinjaScript.DrawingTools.Draw.RegionHighlightY(
                                     this,                   // Contexto del indicador o estrategia
-                                    "RegionLowLightY" + zone.Id,  // Nombre único para la región
-                                    zone.ClosePrice,              // Nivel de precio superior
-                                    zone.MaxOrMinPrice,           // Nivel de precio inferior
-                                    zone.HighlightBrush        // Pincel para el color de la región
+                                    "RegionHighLightY" + zone.Id, // Nombre único para la región
+                                    zone.ClosePrice,        // Nivel de precio inferior
+                                    zone.MaxOrMinPrice,     // Nivel de precio superior
+                                    zone.HighlightBrush     // Pincel para el color de la región
                                 );
 
                             }
-                        }
 
-                        return zone;
-
-                    })
-                    .ToList();
-                    
-                    priceListsZones = updatePriceListZones;
-                    lastMaxHighPrice = currentMaxHighPrice;
-                    lastClosingHighPrice = currentClosingHighPrice;
-                    CalculateCurrentMinOrMaxPrice();
-                    maxHighBreakBar = int.MaxValue;
-                    //Print("actualizando maxHighBreakBar");
-                    isBullishBreakoutConfirmed = false;
-                    //isABullishPullback = false;
-                }
-                
-                if (isLowZoneExtended && priceListsZones.Any())
-                {
-                    // Obtiene la zona del soporte con el menor valor máximo alcanzado
-                    currentZone = priceListsZones
-                        .Where(zone => zone.Type == Zone.ZoneType.Support)
-                        .OrderBy(zone => zone.MaxOrMinPrice)
-                        .FirstOrDefault();
-
-                    if (currentZone != null)
-                    {
-                        currentZone.MaxOrMinPrice = supportZoneBreakoutPrice;
-
-                        Print("extendiendo región del soporte...");
-
-                        Print($"extendiendo soporte = {currentZone.Id} precio de cierre: ${currentZone.ClosePrice} precio minimo: ${currentZone.MaxOrMinPrice}");
-
-                        // Dibujar zonas de soporte y resistencia
-                        NinjaTrader.NinjaScript.DrawingTools.Draw.RegionHighlightY(
-                            this, // Contexto del indicador o estrategia
-                            "RegionLowLightY" + currentZone.Id, // Nombre único para la región
-                            currentZone.MaxOrMinPrice,     // Nivel de precio inferior
-                            currentZone.ClosePrice,        // Nivel de precio superior
-                            currentZone.HighlightBrush     // Pincel para el color de la región
-                        );
-
-                        lastMinLowPrice = currentMinLowPrice;
-                        lastClosingLowPrice = currentClosingLowPrice;
-
-                        //: Actualizar mínimo preció alcanzado
-                        CalculateCurrentMinOrMaxPrice();
-
-                        //: Actualizar zona actual 
-                        List<Zone> updateMaxOrMinPriceZone =
-                        priceListsZones.Select(zone =>
-                        {
-                            if (zone.Id == currentZone.Id)
-                            {
-                                zone.MaxOrMinPrice = currentZone.MaxOrMinPrice;
-                            }
+                            zone.RedrawHighZoneIsRequired = false;
                             return zone;
-                        }).ToList();
-                        priceListsZones = updateMaxOrMinPriceZone;
+                            // Dibujar zonas de soporte y resistencia
+                        })
+                        .ToList();
+                        priceListsZones = updatePriceListsZones;
+                        redrawHighZoneIsRequired = false;
                     }
-                    isLowZoneExtended = false;
-                }
-                else if (isBearishBreakoutConfirmed)
-                {
-                    Print("Generando soporte");
-
-                    currentZone = new Zone(
-                        Zone.ZoneType.Support,
-                        currentClosingLowPrice,
-                        supportZoneBreakoutPrice
-                    );
-
-                    priceListsZones.Add(currentZone);
-
-                    List<Zone> updatePriceListZones = priceListsZones.Select(zone =>
+                    if (redrawLowZoneIsRequired)
                     {
+                        Print("redibujando dimensiones de la zona intermedia a la baja");
 
-                        if (!zone.IsResistenceZone())
+                        List<Zone> updatePriceListsZones = priceListsZones.Select(zone =>
                         {
-                            
-                            if (
-                                zone.MaxOrMinPrice == supportZoneBreakoutPrice
-                            )
+                            if (!zone.IsResistenceZone() && zone.RedrawLowZoneIsRequired)
                             {
-
-                                Print($"Generando soporte: {zone.Id} precio de cierre: {zone.ClosePrice} y precio de apertura: {zone.MaxOrMinPrice}");
-
-                                // Dibujar zonas de soporte 
+                                //Print($"redibujando soporte = {zone.Id}");
                                 NinjaTrader.NinjaScript.DrawingTools.Draw.RegionHighlightY(
-                                    this,                 // Contexto del indicador o estrategia
-                                    "RegionLowLightY" + zone.Id,  // Nombre único para la región
-                                    zone.MaxOrMinPrice,           // Nivel de precio inferior
-                                    zone.ClosePrice,              // Nivel de precio superior
+                                    this,                   // Contexto del indicador o estrategia
+                                    "RegionLowLightY" + zone.Id, // Nombre único para la región
+                                    zone.ClosePrice,        // Nivel de precio inferior
+                                    zone.MaxOrMinPrice,     // Nivel de precio superior
                                     zone.HighlightBrush     // Pincel para el color de la región
                                 );
                             }
-                            else if (
-                                zone.MaxOrMinPrice > supportZoneBreakoutPrice
+
+                            zone.RedrawLowZoneIsRequired = false;
+                            return zone;
+                        })
+                        .ToList();
+                        priceListsZones = updatePriceListsZones;
+                        redrawLowZoneIsRequired = false;
+                    }
+
+                    if (priceListsZones.Any())
+                    {
+                        // TODO Crear un contador para el caso en que una zona intermedia sea superada con confirmación eliminar sin necesidad de esperar el retroceso 
+                        /*List<Zone> breakoutsZonesUpdated = priceListsZones.Select(zone => {
+                            if (zone.IsResistenceZone())
+                            {
+                                if (currentZigZagLow > zone.MaxOrMinPrice)
+                                {zone.IsResistenceBreakout = true;}
+                            }
+                            else
+                            {
+                                if (currentZigZagHigh < zone.MaxOrMinPrice)
+                                {zone.IsSupportBreakout = true;}
+                            }
+                            return zone;
+                        })
+                        .ToList();
+                        priceListsZones = breakoutsZonesUpdated;
+                        */
+                        
+                        priceListsZones.RemoveAll(zone =>
+                        {
+                            if (
+                                zone.IsResistenceZone() &&
+                                zone.IsResistenceBreakout && 
+                                zone.IsSupportBreakout
+
                             )
                             {
-                                Print(
-                                $"La zona {zone.Id} está siendo convertida a resistencia " +
-                                $"con el precio mínimo de: {zone.MaxOrMinPrice} y el " +
-                                $"precio de cierre: {zone.ClosePrice}"
-                                );
-
-                                double lastMaxOrMinPrice = zone.MaxOrMinPrice;
-                                double lastPriceClose = zone.ClosePrice;
-
-                                zone.ClosePrice = lastMaxOrMinPrice;
-                                zone.MaxOrMinPrice = lastPriceClose;
-
-                                zone.IsSupportBreakout = true;
-                                zone.IsIntermediateZone = true;
-                                zone.Type = Zone.ZoneType.Resistance;
-                                zone.HighlightBrush = Brushes.Green.Clone();
-                                zone.HighlightBrush.Opacity = 0.3;
-
-                                RemoveDrawObject("RegionLowLightY" + zone.Id);
-
-                                NinjaTrader.NinjaScript.DrawingTools.Draw.RegionHighlightY(
-                                    this,                    // Contexto del indicador o estrategia
-                                    "RegionHighLightY" + zone.Id, // Nombre único para la región
-                                    zone.ClosePrice,              // Nivel de precio inferior
-                                    zone.MaxOrMinPrice,           // Nivel de precio superior
-                                    zone.HighlightBrush       // Pincel para el color de la región
-                                );
+                                Print($"eliminando resistencia = {zone.Id}");
+                                RemoveDrawObject("RegionHighLightY" + zone.Id);
+                                return true; // Eliminar zona
                             }
-                        }
+                            else if (
+                                !zone.IsResistenceZone() &&
+                                zone.IsResistenceBreakout && 
+                                zone.IsSupportBreakout
+                            )
+                            {
+                                Print($"eliminando soporte = {zone.Id}");
+                                RemoveDrawObject("RegionLowLightY" + zone.Id);
+                                return true; // Eliminar zona
+                            }
 
-                        return zone;
+                            return false; // No eliminar zona
+                        });
+                    }
 
-                    })
-                    .ToList();
-                    priceListsZones = updatePriceListZones;
-
-                    //}
-                    //lastMinLowPrice = currentMinLowPrice;
-                    //Print($"lastMinLowPrice after update = {lastMinLowPrice}");
-                    lastClosingLowPrice = currentClosingLowPrice;
-                    CalculateCurrentMinOrMaxPrice();
-                    //Print("actualizando minLowBreakBar");
-                    isBearishBreakoutConfirmed = false;
-                    // isABearishPullback = false;
-
-                }
-
-                // redibujar precios de extendimientos de zonas intermedias
-                if (redrawHighZoneIsRequired)
-                {
-                    Print("redibujando dimensiones de la zona intermedia al alza");
-                    List<Zone> updatePriceListsZones = priceListsZones.Select(zone =>
+                    if (lastIdx >= startIndex)
                     {
-                        if (zone.IsResistenceZone() && zone.RedrawHighZoneIsRequired)
+                        // Establecer cordenadas de la línea zig zag. 
+                        float x1 = chartControl.BarSpacingType == BarSpacingType.TimeBased || chartControl.BarSpacingType == BarSpacingType.EquidistantMulti && idx + Displacement >= ChartBars.Count
+                            ? chartControl.GetXByTime(ChartBars.GetTimeByBarIdx(chartControl, idx + Displacement))
+                            : chartControl.GetXByBarIndex(ChartBars, idx + Displacement);
+                        float y1 = chartScale.GetYByValue(candlestickBodyValue);
+                        if (sink == null)
                         {
-                            Print($"redibujando resistencia = {zone.Id} ClosePrice = {zone.ClosePrice} MaxOrMinPrice = {zone.MaxOrMinPrice}");
-                            NinjaTrader.NinjaScript.DrawingTools.Draw.RegionHighlightY(
-                                this,                   // Contexto del indicador o estrategia
-                                "RegionHighLightY" + zone.Id, // Nombre único para la región
-                                zone.ClosePrice,        // Nivel de precio inferior
-                                zone.MaxOrMinPrice,     // Nivel de precio superior
-                                zone.HighlightBrush     // Pincel para el color de la región
-                            );
+                            //TODO analizar bloque para dibujo de la línea al iniciar el script
+                            float x0 = chartControl.BarSpacingType == BarSpacingType.TimeBased || chartControl.BarSpacingType == BarSpacingType.EquidistantMulti && lastIdx + Displacement >= ChartBars.Count
+                            ? chartControl.GetXByTime(ChartBars.GetTimeByBarIdx(chartControl, lastIdx + Displacement))
+                            : chartControl.GetXByBarIndex(ChartBars, lastIdx + Displacement);
+                            float y0 = chartScale.GetYByValue(lastValue);
+                            
+                            g = new SharpDX.Direct2D1.PathGeometry(Core.Globals.D2DFactory);
+                            sink = g.Open();
+                            sink.BeginFigure(new SharpDX.Vector2(x0, y0), SharpDX.Direct2D1.FigureBegin.Hollow);
+                        }   
+                        
+                        // CASO ESPECIAL: Detectar y dibujar forma de "V" 
+                        bool hasVShape = false;
+                        double vHigh = 0, vLow = 0;
+                        
+                        // Verificar si esta vela tiene forma de "V" (ambos puntos en la misma vela)
+                        if (isHigh && isLow)
+                        {
+                            // Esta vela tiene tanto punto alto como bajo - es una V
+                            vHigh = zigZagHighZigZags.GetValueAt(idx);
+                            vLow = zigZagLowZigZags.GetValueAt(idx);
+                            hasVShape = true;
 
+                            //Print($"Detectando V histórica en vela {idx}: Alto {vHigh}, Bajo {vLow}");
+                        }
+                        
+                        // Si estamos creando V actualmente o encontramos una V histórica
+                        if ((isCreatingVShape && !vShapeDrawn && idx == CurrentBar) || (hasVShape && idx != CurrentBar))
+                        {
+                            double highPrice = isCreatingVShape ? vShapeHighPrice : vHigh;
+                            double lowPrice = isCreatingVShape ? vShapeLowPrice : vLow;
+                            
+                            // Determinar el tipo de vela: usar el almacenado para velas históricas
+                            bool candleIsBullish = isCreatingVShape ? vShapeCandleIsBullish : 
+                                                (vShapeCandleTypes.IsValidDataPointAt(idx) ? vShapeCandleTypes.GetValueAt(idx) : false);
+                            
+                            // LÓGICA ESPECIAL: Dibujar según el tipo de vela
+                            if(candleIsBullish){
+                                // Vela alcista: dibujar desde bajo hacia alto
+                                float y1_low = chartScale.GetYByValue(lowPrice);
+                                sink.AddLine(new SharpDX.Vector2(x1, y1_low));
+                                
+                                float y1_high = chartScale.GetYByValue(highPrice);
+                                sink.AddLine(new SharpDX.Vector2(x1, y1_high));
+                                
+                                //Print($"V ALCISTA: Línea vertical desde bajo {lowPrice} hasta alto {highPrice}");
+                                
+                                // Actualizar para la siguiente iteración - terminar en el alto
+                                lastIdx = idx;
+                                lastValue = highPrice;  // El siguiente punto será desde el alto
+                            }
+                            else {
+                                // Vela bajista: dibujar desde alto hacia bajo
+                                float y1_high = chartScale.GetYByValue(highPrice);
+                                sink.AddLine(new SharpDX.Vector2(x1, y1_high));
+                                
+                                float y1_low = chartScale.GetYByValue(lowPrice);
+                                sink.AddLine(new SharpDX.Vector2(x1, y1_low));
+                                
+                                //Print($"V BAJISTA: Línea vertical desde alto {highPrice} hasta bajo {lowPrice}");
+                                
+                                // Actualizar para la siguiente iteración - terminar en el bajo
+                                lastIdx = idx;
+                                lastValue = lowPrice;  // El siguiente punto será desde el bajo
+                            }
+                            
+                            // Solo resetear variables si es la vela actual
+                            if (isCreatingVShape && idx == CurrentBar)
+                            {
+                                isCreatingVShape = false;
+                                vShapeDrawn = true; 
+                                Print("vShapeDrawn = true");
+                            }
+                            
+                            continue; // Saltar el procesamiento normal para esta vela
                         }
 
-                        zone.RedrawHighZoneIsRequired = false;
-                        return zone;
-                        // Dibujar zonas de soporte y resistencia
-                    })
-                    .ToList();
-                    priceListsZones = updatePriceListsZones;
-                    redrawHighZoneIsRequired = false;
-                }
-                if (redrawLowZoneIsRequired)
-                {
-                    Print("redibujando dimensiones de la zona intermedia a la baja");
+                        //Print($"dibujando zigzag line al pico de la vela en punto en X: {x1} a punto en Y: {y1}");
+                        sink.AddLine(new SharpDX.Vector2(x1, y1));
 
-                    List<Zone> updatePriceListsZones = priceListsZones.Select(zone =>
-                    {
-                        if (!zone.IsResistenceZone() && zone.RedrawLowZoneIsRequired)
+                    }
+                    // Save as previous point
+                    lastIdx = idx;
+                    lastValue = candlestickBodyValue;
+                    // Save as previous point - SOLO si no acabamos de dibujar una forma V
+                    // (porque ya establecimos lastValue y lastIdx correctamente en el bloque de forma V)
+                    /*
+                        bool justDrewVShape = (isCreatingVShape && !vShapeDrawn && idx == CurrentBar) || 
+                        (zigZagHighZigZags.IsValidDataPointAt(idx) && zigZagLowZigZags.IsValidDataPointAt(idx) && idx != CurrentBar);
+                        
+                        if (!justDrewVShape)
                         {
-                            //Print($"redibujando soporte = {zone.Id}");
-                            NinjaTrader.NinjaScript.DrawingTools.Draw.RegionHighlightY(
-                                this,                   // Contexto del indicador o estrategia
-                                "RegionLowLightY" + zone.Id, // Nombre único para la región
-                                zone.ClosePrice,        // Nivel de precio inferior
-                                zone.MaxOrMinPrice,     // Nivel de precio superior
-                                zone.HighlightBrush     // Pincel para el color de la región
-                            );
-                        }
-
-                        zone.RedrawLowZoneIsRequired = false;
-                        return zone;
-                    })
-                    .ToList();
-                    priceListsZones = updatePriceListsZones;
-                    redrawLowZoneIsRequired = false;
-                }
-
-                if (priceListsZones.Any())
-                {
-                    // TODO Crear un contador para el caso en que una zona intermedia sea superada con confirmación eliminar sin necesidad de esperar el retroceso 
-                    /*List<Zone> breakoutsZonesUpdated = priceListsZones.Select(zone => {
-                        if (zone.IsResistenceZone())
-                        {
-                            if (currentZigZagLow > zone.MaxOrMinPrice)
-                            {zone.IsResistenceBreakout = true;}
+                            lastIdx = idx;
+                            lastValue = candlestickBodyValue;
                         }
                         else
                         {
-                            if (currentZigZagHigh < zone.MaxOrMinPrice)
-                            {zone.IsSupportBreakout = true;}
+                            // Para formas V, lastIdx ya se estableció en el bloque de forma V
+                            // Solo necesitamos asegurar que lastIdx esté actualizado
+                            if (lastIdx != idx)
+                            {
+                                lastIdx = idx;
+                            }
                         }
-                        return zone;
-                    })
-                    .ToList();
-                    priceListsZones = breakoutsZonesUpdated;
                     */
-                    
-                    priceListsZones.RemoveAll(zone =>
-                    {
-                        if (
-                            zone.IsResistenceZone() &&
-                            zone.IsResistenceBreakout && 
-                            zone.IsSupportBreakout
-
-                        )
-                        {
-                            Print($"eliminando resistencia = {zone.Id}");
-                            RemoveDrawObject("RegionHighLightY" + zone.Id);
-                            return true; // Eliminar zona
-                        }
-                        else if (
-                            !zone.IsResistenceZone() &&
-                            zone.IsResistenceBreakout && 
-                            zone.IsSupportBreakout
-                        )
-                        {
-                            Print($"eliminando soporte = {zone.Id}");
-                            RemoveDrawObject("RegionLowLightY" + zone.Id);
-                            return true; // Eliminar zona
-                        }
-
-                        return false; // No eliminar zona
-                    });
                 }
-
-                if (lastIdx >= startIndex)
-                {
-                    //Print("justo antes de calcular para dibujar");
-                    // Establecer cordenadas de la línea zig zag. 
-                    float x1 = (chartControl.BarSpacingType == BarSpacingType.TimeBased || chartControl.BarSpacingType == BarSpacingType.EquidistantMulti && idx + Displacement >= ChartBars.Count
-                        ? chartControl.GetXByTime(ChartBars.GetTimeByBarIdx(chartControl, idx + Displacement))
-                        : chartControl.GetXByBarIndex(ChartBars, idx + Displacement));
-                    float y1 = chartScale.GetYByValue(candlestickBodyValue);
-                    
-                    if (sink == null)
-                    {
-                        float x0 = (chartControl.BarSpacingType == BarSpacingType.TimeBased || chartControl.BarSpacingType == BarSpacingType.EquidistantMulti && lastIdx + Displacement >= ChartBars.Count
-                        ? chartControl.GetXByTime(ChartBars.GetTimeByBarIdx(chartControl, lastIdx + Displacement))
-                        : chartControl.GetXByBarIndex(ChartBars, lastIdx + Displacement));
-                        float y0 = chartScale.GetYByValue(lastValue);
-                        g = new SharpDX.Direct2D1.PathGeometry(Core.Globals.D2DFactory);
-                        sink = g.Open();
-                        sink.BeginFigure(new SharpDX.Vector2(x0, y0), SharpDX.Direct2D1.FigureBegin.Hollow);
-                    }
-                    
-                    // CASO ESPECIAL: Detectar y dibujar forma de "V" 
-                    bool hasVShape = false;
-                    double vHigh = 0, vLow = 0;
-                    
-                    // Verificar si esta vela tiene forma de "V" (ambos puntos en la misma vela)
-                    if (zigZagHighZigZags.IsValidDataPointAt(idx) && zigZagLowZigZags.IsValidDataPointAt(idx))
-                    {
-                        // Esta vela tiene tanto punto alto como bajo - es una V
-                        vHigh = zigZagHighZigZags.GetValueAt(idx);
-                        vLow = zigZagLowZigZags.GetValueAt(idx);
-                        hasVShape = true;
-                        
-                        //Print($"Detectando V histórica en vela {idx}: Alto {vHigh}, Bajo {vLow}");
-                    }
-                    
-                    // Si estamos creando V actualmente o encontramos una V histórica
-                    //! PORCIÓN DE CÓDIGO SE MANTIENE EJECUTANDO INFINITAMENTE POR TODAS LAS VELAS EN FORMA DE "V"
-                    if ((isCreatingVShape && !vShapeDrawn && idx == CurrentBar) || (hasVShape && idx != CurrentBar))
-                    {
-                        double highPrice = isCreatingVShape ? vShapeHighPrice : vHigh;
-                        double lowPrice = isCreatingVShape ? vShapeLowPrice : vLow;
-                        
-                        // Dibujar línea al pico alto primero
-                        sink.AddLine(new SharpDX.Vector2(x1, y1));
-                        
-                        // Luego dibujar línea vertical al pico bajo de la misma vela
-                        float y1_low = chartScale.GetYByValue(lowPrice);
-                        sink.AddLine(new SharpDX.Vector2(x1, y1_low));
-                        
-                        // Actualizar para la siguiente iteración
-                        lastIdx = idx;
-                        lastValue = lowPrice;  // El siguiente punto será desde el bajo
-
-                        //! AL DESCOMENTAR EL PRINT SE VALIDA COMO SE EJECUTA DE FORMA INDEFINIDA EN ITERACIONES INNECESARIAS 
-                        //Print($"Dibujando V: Línea vertical desde {y1} hasta {y1_low} en vela {idx}");
-                        
-                        // Solo resetear variables si es la vela actual
-                        if (isCreatingVShape && idx == CurrentBar)
-                        {
-                            isCreatingVShape = false;
-                            vShapeDrawn = true; 
-                            // NO resetear vShapeDrawn aquí - debe persistir durante toda la vela
-                            Print("Variables de V reseteadas después del dibujo");
-                        }
-                        
-                        continue; // Saltar el procesamiento normal para esta vela
-                    }
-                    
-                    sink.AddLine(new SharpDX.Vector2(x1, y1));
-                }
-                // Save as previous point
-                lastIdx = idx;
-                lastValue = candlestickBodyValue;
+                
             }
 
             if (sink != null)
@@ -2185,33 +2299,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
             else
                 Draw.TextFixed(this, "NinjaScriptInfo", NinjaTrader.Custom.Resource.ZigZagDeviationValueError, TextPosition.BottomRight);
-                
-            // 3. Al INICIO de OnRender (como primera instrucción tras las validaciones iniciales):
-            /*if (pendingFirstZigZagLine && ChartBars != null && chartControl != null && chartScale != null)
-            {
-                try
-                {
-                    float x0 = chartControl.GetXByBarIndex(ChartBars, initialBarIdx1);
-                    float y0 = chartScale.GetYByValue(initialY1);
-                    float x1 = chartControl.GetXByBarIndex(ChartBars, initialBarIdx0);
-                    float y1 = chartScale.GetYByValue(initialY0);
-                    using (var path = new SharpDX.Direct2D1.PathGeometry(Core.Globals.D2DFactory))
-                    using (var sink2 = path.Open())
-                    {
-                        sink2.BeginFigure(new SharpDX.Vector2(x0, y0), SharpDX.Direct2D1.FigureBegin.Hollow);
-                        sink2.AddLine(new SharpDX.Vector2(x1, y1));
-                        sink2.EndFigure(SharpDX.Direct2D1.FigureEnd.Open);
-                        sink2.Close();
-                        RenderTarget.DrawGeometry(path, Brushes.DodgerBlue.ToDxBrush(RenderTarget), 3);
-                    }
-                    pendingFirstZigZagLine = false;
-                }
-                catch (Exception ex)
-                {
-                    Print("Error dibujando la primera línea ZigZag: " + ex.ToString());
-                }
-            }
-            */
+            
         }
 
         #endregion
