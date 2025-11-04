@@ -109,25 +109,17 @@ namespace NinjaTrader.NinjaScript.Indicators
         private bool isSwingLow;
         
         // Variables para manejar el caso especial de "V" cuando una vela supera por ambos picos
-        private bool isCreatingVShape = false;
-        private bool vShapeDrawn = false;
         private double vShapeHighPrice = 0;
         private double vShapeLowPrice = 0;
+        private bool isCreatingVShape = false;
+        private bool vShapeDrawn = false;
         private bool vShapeCandleIsBullish = false; // Almacenar el tipo de vela para la forma V
         private bool currentCandleIsDoji;
-
-        private double lastHistHigh;
-        private double lastHistLow;
 
         // Al inicio del archivo, agrega una variable de control para evitar dibujar múltiples veces:
         private bool initialZigZagLineDrawn = false;
         private bool currentMaxHighWasCalculatedFirstTime;
         private bool currentMinLowWasCalculatedFirstTime;
-
-        // 1. Agregar variables (a nivel de clase):
-        private bool pendingFirstZigZagLine = false;
-        private double initialY0, initialY1;
-        private int initialBarIdx0, initialBarIdx1;
 
         // Ultima actualización para ticks en marketData Update
         DateTime lastUpdate = DateTime.MinValue;
@@ -183,6 +175,10 @@ namespace NinjaTrader.NinjaScript.Indicators
                 trendDir = 0; // 1 = trend up, -1 = trend down, init = 0;
                 isSwingHigh = false;
                 isSwingLow = false;
+
+                // Reiniciar flags de primer swing
+                isTheFirstSwingHigh = false;
+                isTheFirstSwingLow = false;
                 
                 // Inicializar variables para forma de "V"
                 isCreatingVShape = false;
@@ -272,8 +268,8 @@ namespace NinjaTrader.NinjaScript.Indicators
             currentMinLowPrice = double.MinValue;
             
             // Reiniciar flags de primer swing
-            isTheFirstSwingHigh = true;
-            isTheFirstSwingLow = true;
+            isTheFirstSwingHigh = false;
+            isTheFirstSwingLow = false;
             
             // Reiniciar estado del ZigZag
             currentSwingPrice = 0.0;
@@ -301,9 +297,6 @@ namespace NinjaTrader.NinjaScript.Indicators
 
             currentCandleIsDoji = false;
             
-            lastHistHigh = 0;
-            lastHistLow = 0;
-
             firstBreakDirection = 0;
             firstBreakDirectionPrice = 0;
             lastCandleExceedsBothPeaksEndsInABullishPeak = false;
@@ -521,29 +514,30 @@ namespace NinjaTrader.NinjaScript.Indicators
             // SOLO PROCESAR ZIGZAG SI ESTAMOS EN TIEMPO REAL Y LA BARRA ES NUEVA
             if (!isRealtimeZigZagActive)
             {
-                /*if(High[1] > High[0]){
-                    trendDir = 1;
-                }
-
-                else if(Low[1] < Low[0]){
-                    trendDir = -1;
-                }
-
-                else if(High[1] > High[0] && Low[1] < Low[0]){
-                    trendDir = 1;
-                    trendDir = -1;
-                }*/
                 // Si no estamos en tiempo real, no procesar ZigZag
                 return;
             }
 
-            // Initialization - Solo para la primera barra en tiempo real
-            if (lastSwingPrice == 0.0 && CurrentBar == startVerticalLineIndex + 1)
+            // Procesar cuando estamos en tiempo real y no se ha generado el primero retroceso
+            if (CurrentBar >= startVerticalLineIndex + 1 && (!isTheFirstSwingHigh || !isTheFirstSwingLow))
             {
-                // Establecer el valor del precio actual como punto de partida
-                lastSwingPrice = Input[0];
-                Print($"Inicializando ZigZag en tiempo real con precio inicial: ${lastSwingPrice} en barra #{CurrentBar}");
+                // Initialization - Solo para la primera barra en tiempo real
+                if(CurrentBar == startVerticalLineIndex + 1){
+                    lastSwingPrice = Input[0];
+                    Print($"Inicializando ZigZag en tiempo real con precio inicial: ${lastSwingPrice} en barra #{CurrentBar}");
+                }
 
+                if(Close[0] > Open[0]){
+                    isTheFirstSwingHigh = true;
+                    Print("=== La barra actual es alcista ===");
+                }
+
+                else if(Close[0] < Open[0]){
+                    isTheFirstSwingLow = true;
+                    Print("=== La barra actual es bajista ===");
+                }
+
+                else Print("=== La barra actual es DOJI ===");
             }
 
             if(CurrentBar >= startVerticalLineIndex + 1){
@@ -572,6 +566,9 @@ namespace NinjaTrader.NinjaScript.Indicators
                 bool updateHigh = false;
                 bool updateLow = false;
 
+                // Determinar si la vela actual es la primera vela a analizar
+                bool isTheFirstBarToAnalyze = CurrentBar == startVerticalLineIndex + 1;
+
 				// ¿Cambia la dirección? (mínimo actual retrocede más que el mínimo de la vela anterior)
 				bool changeDir = false;
 
@@ -586,6 +583,10 @@ namespace NinjaTrader.NinjaScript.Indicators
                 {
                     // Determinar si la última vela NO doji fue alcista o bajista
                     lastNonDojiIsBullish = Close[lastNonDojiIndex] > Open[lastNonDojiIndex];
+                }
+
+                if(isTheFirstBarToAnalyze){
+                    //lastSwingIdx = CurrentBar;
                 }
 
                 if(CurrentBar >= startVerticalLineIndex + 1){
@@ -643,8 +644,9 @@ namespace NinjaTrader.NinjaScript.Indicators
                 itIsABearishPullback = false;
                 itIsABullishPullback = false;
             
+                
                 if(!previousCandleIsBullish){
-                    if(highSeries[0] > previousCandleMinPrice){
+                    if(highSeries[0] > previousCandleMinPrice && trendDir <= 0){
                         changeDir = trendDir <= 0;
                         trendDir = 1;
                         itIsABullishPullback = true;
@@ -659,7 +661,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                     Print($"cambiando a retroceso {typeOfSwing} changeDir = {changeDir}");   
                 }
                 else if(previousCandleIsBullish){
-                    if(lowSeries[0] < previousCandleMinPrice){
+                    if(lowSeries[0] < previousCandleMinPrice && trendDir >= 0){
                         changeDir = trendDir >= 0;
                         trendDir = -1;
                         itIsABearishPullback = true;
@@ -698,16 +700,16 @@ namespace NinjaTrader.NinjaScript.Indicators
                 }
 
                 // Sí el mínimo de la vel aactual retrocede más que la anterior
-				if (changeDir)
-				{
-					if (trendDir > 0) // vela actual verde -> nuevo tramo al alza, anclar en el máximo entre [0] y [1]
-					{
-						addHigh = true;
-					}
-					else if(trendDir < 0) // vela actual roja -> nuevo tramo a la baja, anclar en el mínimo entre [0] y [1]
-					{
-						addLow = true;
-					}
+                if (changeDir)
+                {
+                    if (trendDir > 0) // vela actual verde -> nuevo tramo al alza, anclar en el máximo entre [0] y [1]
+                    {
+                        addHigh = true;
+                    }
+                    else if(trendDir < 0) // vela actual roja -> nuevo tramo a la baja, anclar en el mínimo entre [0] y [1]
+                    {
+                        addLow = true;
+                    }
                     else if(currentCandleIsDoji){ // si la vela actual es Doji
                         if(trendDir > 0) {addHigh = true;}
                         else if(trendDir < 0) {addLow = true;}
@@ -717,9 +719,9 @@ namespace NinjaTrader.NinjaScript.Indicators
                     //TODO establecer en el bloque correcto para evitar que se cancele actualización de vela en forma de V a otra vela en forma de V en casos donde hay cambio de dirección
 
                     Print($"currentSwingPrice = ${currentSwingPrice}");
-				}
-				else
-				{
+                }
+                else
+                {
                     // LÓGICA NORMAL: Seguir en la misma dirección con las validaciones existentes
                     if (trendDir >= 0)
                     {
@@ -753,7 +755,14 @@ namespace NinjaTrader.NinjaScript.Indicators
                             Print($"habilitando actualización a la baja en la vela #{CurrentBar} con el precio ${currentSwingPrice}");
                         }
                     }
-				}
+                }
+                        
+                if(lastCandleExceedsBothPeaks){
+                    Print("Vela posterior a superación del precio en dos direcciones");
+                    lastPeakIsInAVShapeCandle = true; // Establece que el último pico fue en forma de V
+                    lastCandleExceedsBothPeaksEndsInABullishPeak = previousCandleIsBullish;
+                    Print($"Estableciendo lastCandleExceedsBothPeaksEndsInABullishPeak en: {previousCandleIsBullish}");
+                }
 
                 if(lastCandleExceedsBothPeaks && highSeries[0] > vShapeHighPrice && lastCandleExceedsBothPeaksEndsInABullishPeak){
                     // Fuerza a que updateHigh se actualice cuando el precio continua en la misma dirección alcista
@@ -772,15 +781,17 @@ namespace NinjaTrader.NinjaScript.Indicators
                     Print("vShapeDrawn = false");
                 }
 
+                // TODO ejecutar una condición para validar si la primer vela que se carga en el gráfico es una vela que supera por ambos picos y si es así forzar la creación de la forma de V
                 if (currentCandleExceedsBothPeaks)
                 {
                     Print($"VELA SUPERA POR AMBOS PICOS: High actual {highSeries[0]} > High anterior {highSeries[1]} Y Low actual {lowSeries[0]} < Low anterior {lowSeries[1]}");
-                    Print($"lastSwingPrice: ${lastSwingPrice} < vShapeHighPrice: ${vShapeHighPrice} = {lastSwingPrice < vShapeHighPrice}");
-                    Print($"lastSwingPrice: ${lastSwingPrice} > vShapeLowPrice: ${vShapeLowPrice} = {lastSwingPrice > vShapeLowPrice}");
                     // CASO ESPECIAL: Crear AMBOS puntos permanentes en OnBarUpdate
                     vShapeHighPrice = highSeries[0];
                     vShapeLowPrice = lowSeries[0];
                     vShapeCandleIsBullish = currentCandleIsBullish; // Guardar el tipo de vela
+                    
+                    Print($"lastSwingPrice: ${lastSwingPrice} < vShapeHighPrice: ${vShapeHighPrice} = {lastSwingPrice < vShapeHighPrice}");
+                    Print($"lastSwingPrice: ${lastSwingPrice} > vShapeLowPrice: ${vShapeLowPrice} = {lastSwingPrice > vShapeLowPrice}");
                     
                     // Crear AMBOS puntos para que persistan
                     //* Si al ejecutar el gráfico la primer vela es alcista y genera una superación en ambas direcciones no se trazara la línea en dos direcciones
@@ -796,6 +807,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                         
                         //lastCandleExceedsBothPeaksEndsInABullishPeak = true;
                         isCreatingVShape = true; // Activar lógica para dibujar en forma de V
+                        //itIsABullishPullback = true;
 
                         Print($"Creando V ALCISTA: Punto bajo {lowSeries[0]} y punto alto {highSeries[0]} - AMBOS PUNTOS PERMANENTES");
                         Print($"updateLow = {updateLow}");
@@ -812,21 +824,16 @@ namespace NinjaTrader.NinjaScript.Indicators
                         
                         //lastCandleExceedsBothPeaksEndsInABullishPeak = false;
                         isCreatingVShape = true; // Activar lógica para dibujar en forma de V
+                        //itIsABearishPullback = true;
 
                         Print($"Creando V BAJISTA: Punto alto {highSeries[0]} y punto bajo {lowSeries[0]} - AMBOS PUNTOS PERMANENTES");
                         Print($"updateHigh = {updateHigh}");
+                        Print($"addLow = {addLow}");
                     }
                 }
                 
-                if(lastCandleExceedsBothPeaks){
-                    Print("Vela posterior a superación del precio en dos direcciones");
-                    lastPeakIsInAVShapeCandle = true; // Establece que el último pico fue en forma de V
-                    lastCandleExceedsBothPeaksEndsInABullishPeak = previousCandleIsBullish;
-                    Print($"Estableciendo lastCandleExceedsBothPeaksEndsInABullishPeak en: {previousCandleIsBullish}");
-
-                }
                 // Actualizar precios máximos y mínimos alcanzados y guardar rompimientos pendientes a confirmar cuando un precio máximo y/o mínimo es superado o es el primer retroceso en dirección opuesta
-                if (isPriceGreatherThanCurrentMaxHighPrice || (itIsABullishPullback && !currentMaxHighWasCalculatedFirstTime))
+                if (isPriceGreatherThanCurrentMaxHighPrice || (itIsABullishPullback && isTheFirstSwingHigh && !currentMaxHighWasCalculatedFirstTime))
                 {
                     //Actualiza el precio máximo alcanzado durante la sesión
                     currentMaxHighPrice = highSeries[0];
@@ -868,7 +875,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                     );
                 }
 
-                if (isPriceLessThanCurrentMinLowPrice || (itIsABearishPullback &&
+                if (isPriceLessThanCurrentMinLowPrice || (itIsABearishPullback && isTheFirstSwingLow &&
                 !currentMinLowWasCalculatedFirstTime))
                 {
                     //Actualiza el precio máximo alcanzado durante la sesión
@@ -1020,8 +1027,9 @@ namespace NinjaTrader.NinjaScript.Indicators
                 }
                 
                 Print($"Pending breakouts candidates before event = {pendingListOfBreakouts.Count()}");
+                // TODO establecer un criterio para que al inicio del bot se deba producir un retroceso por parte de una vela alcista y bajista o viceversa antes de generar la primera zona
                 // Realizar validación de confirmación de los rompimientos pendientes por tipo de rompimiento
-                if (pendingListOfBreakouts.Any())
+                if (pendingListOfBreakouts.Any() && isTheFirstSwingHigh && isTheFirstSwingLow)
                 {
                     int index = 0;
 
@@ -1388,6 +1396,11 @@ namespace NinjaTrader.NinjaScript.Indicators
                     Print($"Validando condición para actualizar zig zag line al alza: {updateHigh && lastSwingIdx >= 0 && (!vShapeDrawn || lastPeakIsInAVShapeCandle && lastCandleExceedsBothPeaksEndsInABullishPeak && lastSwingPrice < highSeries[0])}");
                     Print($"Validando condición para actualizar zig zag line a la baja: {updateLow && lastSwingIdx >= 0 && (!vShapeDrawn || lastPeakIsInAVShapeCandle && !lastCandleExceedsBothPeaksEndsInABullishPeak && lastSwingPrice > lowSeries[0])}");
 
+                    Print($"addLow = {addLow}");
+                    Print($"addHigh = {addHigh}");
+
+                    Print($"lastSwingPrice :${lastSwingPrice} < highSeries[0]: ${highSeries[0]} = {lastSwingPrice < highSeries[0]}");
+
                     // TODO validar si la inicialización de lastCandleExceedsBothPeaksEndsInABullishPeak en false antes de que se procesen suficientes velas al inicio del script causa algun problema 
                     if (updateHigh && lastSwingIdx >= 0 && (!vShapeDrawn || lastPeakIsInAVShapeCandle && lastCandleExceedsBothPeaksEndsInABullishPeak && lastSwingPrice < highSeries[0]))
                     {
@@ -1468,22 +1481,23 @@ namespace NinjaTrader.NinjaScript.Indicators
                         lastPeakIsInAVShapeCandle = false; // Establece que el último pico NO fue en forma de V
                     }
 
+                    // TODO en algunos casos el valor del lastSwingPrice no almacena el precio del último pico cuando se realiza dibujo en forma de V. 
                     // Actualizar índices - si tenemos ambos puntos, usar el bajo como referencia
-                    if (isCreatingVShape && addLow)
+                    if (isCreatingVShape && addLow && !currentCandleIsBullish)
                     {
-                        lastSwingIdx = CurrentBar;
                         lastSwingPrice = vShapeLowPrice;  // Usar el precio bajo como referencia
                     }
-                    else if(isCreatingVShape && addHigh)
+                    else if(isCreatingVShape && addHigh && currentCandleIsBullish)
                     {
-                        lastSwingIdx = CurrentBar;
                         lastSwingPrice = vShapeHighPrice;  // Usar el precio alto como referencia
                     }
                     else
                     {
-                        lastSwingIdx = CurrentBar;
                         lastSwingPrice = currentSwingPrice;
                     }
+
+                    lastSwingIdx = CurrentBar;
+
 
                     // Resetear vShapeDrawn al final del render para la próxima vela
                     if (vShapeDrawn)
@@ -1597,11 +1611,13 @@ namespace NinjaTrader.NinjaScript.Indicators
             Print("Generando rompimiento de zona intermedia dentro de OnRender");
             if(typeOfBreakout.Equals(BreakoutCandidate.BreakoutType.Bullish)){
                 // Si la vela que genera el retroceso actual supera el el precio de apertura de la zona genera el rompimiento y no hay rompimientos pendientes por confirmación en esta zona
+
+                Print($"candlePrice: ${candlePrice} > zone.MaxOrMinPrice: ${zone.MaxOrMinPrice} = {candlePrice > zone.MaxOrMinPrice} && !zone.IsBreakoutPendingToConfirmation: {!zone.IsBreakoutPendingToConfirmation}");
                 if(candlePrice > zone.MaxOrMinPrice && !zone.IsBreakoutPendingToConfirmation){
                     
                     var newBreakout = new BreakoutCandidate
                     {
-                        MaxBreakoutPrice = currentSwingPrice,
+                        MaxBreakoutPrice = candlePrice,
                         BreakoutBarIndex = CurrentBar,
                         Type = typeOfBreakout,
                         IsIntermediateBreakout = true
@@ -1614,7 +1630,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                 
                 }
                 
-                Print($"último punto al alza guardado 'currentSwingPrice' ${currentSwingPrice}");
+                Print($"último punto al alza guardado 'lastSwingPrice' ${lastSwingPrice}");
             }
             else if(typeOfBreakout.Equals(BreakoutCandidate.BreakoutType.Bearish)){
                 // Si la vela que genera el retroceso actual supera el el precio de apertura de la zona genera el rompimiento y no hay rompimientos pendientes por confirmación en esta zona
@@ -1623,7 +1639,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                     
                     var newBreakout = new BreakoutCandidate
                     {
-                        MaxBreakoutPrice = currentSwingPrice,
+                        MaxBreakoutPrice = candlePrice,
                         BreakoutBarIndex = CurrentBar,
                         Type = typeOfBreakout,
                         IsIntermediateBreakout = true
@@ -1635,6 +1651,9 @@ namespace NinjaTrader.NinjaScript.Indicators
                     zone.IsBreakoutPendingToConfirmation = true;
                 
                 }
+
+                Print($"último punto a la baja guardado 'lastSwingPrice' ${lastSwingPrice}");
+
             }
         }
 
@@ -1913,7 +1932,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                                         zone.HighlightBrush        // Pincel para el color de la región
                                     );
                                     // Si la vela que genera el retroceso actual supera el el precio de cierre de la zona genera el rompimiento
-                                    CurrentCandleExcedsZonePrice(zone, currentSwingPrice, BreakoutCandidate.BreakoutType.Bearish);
+                                    CurrentCandleExcedsZonePrice(zone, lastSwingPrice, BreakoutCandidate.BreakoutType.Bearish);
 
                                 }
                             }
@@ -2017,8 +2036,6 @@ namespace NinjaTrader.NinjaScript.Indicators
                                     $"precio de cierre: {zone.ClosePrice}"
                                     );
 
-                                    Print($"último punto al alza guardado 'currentSwingPrice' ${currentSwingPrice}");
-
                                     double lastMaxOrMinPrice = zone.MaxOrMinPrice;
                                     double lastPriceClose = zone.ClosePrice;
 
@@ -2042,7 +2059,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                                     );
 
                                     // Si la vela que genera el retroceso actual supera el el precio de apertura de la zona genera el rompimiento
-                                    CurrentCandleExcedsZonePrice(zone, currentSwingPrice, BreakoutCandidate.BreakoutType.Bullish);
+                                    CurrentCandleExcedsZonePrice(zone, lastSwingPrice, BreakoutCandidate.BreakoutType.Bullish);
                                 }
                             }
 
